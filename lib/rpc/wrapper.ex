@@ -20,7 +20,7 @@ defmodule EasyRpc.RpcWrapper do
     nodes: [:"test1@test.local"],
     # or nodes: {MyModule, :get_nodes, []}
     error_handling: true, # enable error handling, global setting for all functions.
-    select_node_mode: :random, # select node mode, global setting for all functions.
+    select_mode: :random, # select node mode, global setting for all functions.
     module: TargetApp.RemoteModule,
     functions: [
       # {function_name, arity}
@@ -56,6 +56,11 @@ defmodule EasyRpc.RpcWrapper do
 
   alias :erpc, as: Rpc
 
+  @fun_opts [:new_name, :retry, :error_handling]
+  @select_strategies [:random, :round_robin, :hash]
+
+  @fun_defaults_options [retry: 0, error_handling: false]
+
   alias __MODULE__
 
   require Logger
@@ -69,11 +74,12 @@ defmodule EasyRpc.RpcWrapper do
   end
 
   defmacro __using__(opts) do
-    # using location for debug & dev, remove for production
+    # using location for easily to debug & development.
     quote location: :keep, bind_quoted: [opts: opts] do
       rpc_wrapper_app_name = Keyword.get(opts, :otp_app)
       rpc_wrapper_config_name = Keyword.get(opts, :config_name)
       rpc_error_handling = Keyword.get(opts, :error_handling, false)
+      rpc_select_strategy = Keyword.get(opts, :select_mode, :random)
 
       rpc_wrapper_nodes = quote do RpcWrapper.get_config!(unquote(rpc_wrapper_app_name), unquote(rpc_wrapper_config_name), :nodes) end
       rpc_wrapper_module = quote do RpcWrapper.get_config!(unquote(rpc_wrapper_app_name), unquote(rpc_wrapper_config_name), :module) end
@@ -81,24 +87,64 @@ defmodule EasyRpc.RpcWrapper do
 
       for fun_info <- rpc_wrapper_functions do
         case fun_info do
+          {fun, 0} ->
+            if rpc_error_handling do
+              def unquote(fun)() do
+                RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module),
+                   unquote(fun)}, [], unquote(rpc_select_strategy))
+              end
+            else
+              def unquote(fun)() do
+                RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)},
+                [], unquote(rpc_select_strategy))
+              end
+            end
           {fun, arity} ->
             if rpc_error_handling do
               def unquote(fun)(unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ) do
-                RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)}, [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ])
+                RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module),
+                   unquote(fun)}, [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil)))],
+                   unquote(rpc_select_strategy))
               end
             else
               def unquote(fun)(unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ) do
-                RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)}, [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ])
+                RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)},
+                [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil)))],
+                unquote(rpc_select_strategy))
               end
             end
-          {fun, new_name, arity} ->
-            if rpc_error_handling do
-              def unquote(new_name)(unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ) do
-                RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)}, [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ])
+
+          {fun, 0, fun_opts} ->
+              fun_name = Keyword.get(fun_opts, :new_name, fun)
+              fun_error_handling = Keyword.get(fun_opts, :error_handling, rpc_error_handling)
+
+              if fun_error_handling do
+                def unquote(fun_name)() do
+                  RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module),
+                    unquote(fun)}, [], unquote(rpc_select_strategy))
+                end
+              else
+                def unquote(fun_name)() do
+                  RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)},
+                    [], unquote(rpc_select_strategy))
+                end
+              end
+
+          {fun, arity, fun_opts} ->
+            fun_name = Keyword.get(fun_opts, :new_name, fun)
+            fun_error_handling = Keyword.get(fun_opts, :error_handling, rpc_error_handling)
+
+            if fun_error_handling do
+              def unquote(fun_name)(unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ) do
+                RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module),
+                  unquote(fun)}, [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil)))],
+                  unquote(rpc_select_strategy))
               end
             else
-              def unquote(new_name)(unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ) do
-                RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)}, [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ])
+              def unquote(fun_name)(unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ) do
+                RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)},
+                  [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil)))],
+                  unquote(rpc_select_strategy))
               end
             end
         end
@@ -109,9 +155,9 @@ defmodule EasyRpc.RpcWrapper do
   @doc """
   rpc wrapper, support for define macro.
   """
-  def rpc_call({nodes, mod, fun}, args)
+  def rpc_call({nodes, mod, fun}, args, strategy \\ :random)
   when is_list(args) and (is_list(nodes) or is_tuple(nodes)) and is_atom(mod) and is_atom(fun) do
-    node = select_node(nodes, args)
+    node = EasyRpc.NodeUtils.select_node(nodes, strategy, {mod, args})
 
     prefix_log = "common_lib, account helper, rpc_call, node: #{inspect node}, #{inspect mod}/#{inspect fun}/#{length(args)}, args: #{inspect args}"
 
@@ -123,9 +169,9 @@ defmodule EasyRpc.RpcWrapper do
     @doc """
   rpc wrapper, support for define macro.
   """
-  def rpc_call_error_handling({nodes, mod, fun}, args)
+  def rpc_call_error_handling({nodes, mod, fun}, args, strategy \\ :random)
   when is_list(args) and is_list(nodes) and is_atom(mod) and is_atom(fun) do
-    node = select_node(nodes, args)
+    node = select_node(nodes, {strategy, mod, args})
 
     prefix_log = "common_lib, account helper, rpc_call, node: #{inspect node}, #{inspect mod}/#{inspect fun}/#{length(args)}, args: #{inspect args}"
 
@@ -151,12 +197,14 @@ defmodule EasyRpc.RpcWrapper do
     end
   end
 
-  defp select_node({mod, fun, args}, _args) do
+  defp select_node({mod, fun, args}, _) do
     apply(mod, fun, args)
   end
-  defp select_node(nodes, _args) do
-    # TO-DO: implement real function
-    Enum.random(nodes)
+  defp select_node(node, _) when is_atom(node) do
+    node
+  end
+  defp select_node(nodes, {strategy, module, data}) when is_list(nodes) do
+    node = EasyRpc.NodeUtils.select_node(nodes, strategy, {module, data})
   end
 
   def get_config!(app_name, config_name, :nodes) do
@@ -191,17 +239,23 @@ defmodule EasyRpc.RpcWrapper do
         raise RpcWrapperError, "rpc_wrapper missed configured for :functions in #{app_name}/#{config_name}"
       list when is_list(list) ->
         Enum.map(list, fn
-          {fun, arity} when is_atom(fun) and is_integer(arity) ->
+          {fun, arity} when is_atom(fun) and is_integer(arity) and arity >= 0 ->
             {fun, arity}
-          {fun, new_name, arity} when is_atom(fun) and is_atom(new_name) and is_integer(arity) ->
-            {fun, new_name, arity}
+          {fun, arity, opts} when is_atom(fun) and is_list(opts) and is_integer(arity) and arity >= 0 ->
+            opts = Keyword.merge(@fun_defaults_options, opts)
+            Enum.each(opts, fn {key, value} ->
+              if not Enum.member?(@fun_opts, key) do
+                raise RpcWrapperError, "rpc_wrapper incorrected config for :functions in #{app_name}/#{config_name}, required opts #{inspect(@fun_opts)}, but get #{inspect(key)}"
+              end
+            end)
+            {fun, arity, opts}
           other ->
             raise RpcWrapperError, "rpc_wrapper incorrected config for :functions in #{app_name}/#{config_name}, required tuple {atom, integer}/{atom, atom, integer}, but get #{inspect(other)}"
           end)
     end
   end
 
-  defp get_config!(app_name, config_name) do
+  def get_config!(app_name, config_name) do
     case Application.get_env(app_name, config_name) do
       nil ->
         raise RpcWrapperError, "rpc_wrapper not configured for #{app_name}"

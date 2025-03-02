@@ -5,7 +5,9 @@ defmodule RemoteNode.MixProject do
     [
       app: :remote_node,
       version: "0.1.0",
-      elixir: "~> 1.18",
+      elixir: "~> 1.15",
+      config_path: "config/config.exs",
+      lockfile: "mix.lock",
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -14,6 +16,7 @@ defmodule RemoteNode.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
+      mod: {RemoteNode.Application, []},
       extra_applications: [:logger]
     ]
   end
@@ -21,8 +24,7 @@ defmodule RemoteNode.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      {:libcluster, "~> 3.5"}
     ]
   end
 end

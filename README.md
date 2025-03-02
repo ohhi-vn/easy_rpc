@@ -3,11 +3,11 @@
 
 # EasyRpc
 
-This library help developer easy to wrap a remote procedure call (rpc, app uses Erlang :erpc module).
+This library help developer easy to wrap a remote procedure call (rpc, library uses Erlang `:erpc` module).
 
 ## Installation
 
-Adding `easy_rpc` to your list of dependencies in `mix.exs`:
+Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
@@ -32,7 +32,7 @@ config :app_name, :wrapper_name,
   # or nodes: {MyModule, :get_nodes, []}
   error_handling: true, # enable error handling, global setting for all functions.
   select_node_mode: :random, # select node mode, global setting for all functions.
-  module: TargetApp.RemoteModule,
+  module: TargetApp.Interface.Api,
   functions: [
     # {function_name, arity}
     {:get_data, 1},

@@ -1,21 +1,21 @@
 # SimpleExample
 
-**TODO: Add description**
+This will use `easy_rpc` to call to `RemoteNode.Interface`.
 
-## Installation
+## Guide
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `simple_example` to your list of dependencies in `mix.exs`:
+Need to run with `simple_example` to test.
 
-```elixir
-def deps do
-  [
-    {:simple_example, "~> 0.1.0"}
-  ]
-end
+```Elixir
+mix deps.get
+
+
+iex --name example@127.0.0.1 --cookie need_to_change_this -S mix
+
+# make sure connected to remote node by cmd:
+Node.list()
+# return [:"remote@127.0.0.1"]
+
+SimpleExample.Local.hello_with_name_age("Man", 40)
+# return from remote: "Hello, manh! Your age is 40."
 ```
-
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/simple_example>.
-

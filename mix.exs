@@ -4,10 +4,18 @@ defmodule EasyRpc.MixProject do
   def project do
     [
       app: :easy_rpc,
-      version: "0.1.1",
+      version: "0.1.2",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+
+      # Docs
+      name: "EasyRpc",
+      source_url: "https://github.com/ohhi-vn/easy_rpc",
+      homepage_url: "https://ohhi.vn",
+      docs: docs(),
+      description: description(),
+      package: package()
     ]
   end
 
@@ -21,7 +29,55 @@ defmodule EasyRpc.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ex_doc, "~> 0.24", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.24", only: :dev, runtime: false},
+      {:benchee, "~> 1.3", only: :dev},
     ]
+  end
+
+  defp description() do
+    "A library for wrapping a remote module to call like local function. The library uses macro to create a local function (declare by config)."
+  end
+
+  defp package() do
+    [
+      maintainers: ["Manh Van Vu"],
+      licenses: ["MIT"],
+      links: %{"GitHub" => "https://github.com/ohhi-vn/easy_rpc", "About us" => "https://ohhi.vn/"}
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: extras()
+    ]
+  end
+
+  defp extras do
+    list =
+      "guides/**/*.md"
+      |> Path.wildcard()
+
+    list = list ++ ["README.md"]
+
+    list
+    |> Enum.map(fn path ->
+      title =
+        path
+        |> Path.basename(".md")
+        |> String.split(~r|[-_]|)
+        |> Enum.map_join(" ", &String.capitalize/1)
+        |> case do
+          "F A Q" ->"FAQ"
+          no_change -> no_change
+        end
+
+      {String.to_atom(path),
+        [
+          title: title,
+          default: title == "Guide"
+        ]
+      }
+    end)
   end
 end

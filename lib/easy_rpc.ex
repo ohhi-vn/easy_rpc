@@ -1,18 +1,6 @@
 defmodule EasyRpc do
   @moduledoc """
-  Documentation for `EasyRpc`.
+  EasyRpc is a library help Elixir developer can work easily in Elixir cluster.
+  Please go to README for more information.
   """
-
-  @doc """
-  Hello world.
-
-  ## Examples
-
-      iex> EasyRpc.hello()
-      :world
-
-  """
-  def hello do
-    :world
-  end
 end
