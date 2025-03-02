@@ -26,5 +26,5 @@ config :libcluster,
       {:say_hello_to, 1},
       # {function_name, arity, opts}
       {:say_hello_to_with_age, 2, [new_name: :hello_with_name_age]},
-      {:raise_exception, 0, [new_name: :fail, retry: 3, error_handling: false]}
+      {:raise_exception, 0, [new_name: :fail, retry: 3, error_handling: true]}
     ]

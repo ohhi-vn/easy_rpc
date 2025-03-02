@@ -8,6 +8,7 @@ defmodule EasyRpc.NodeUtils do
   @doc """
   Helper function to calculate target node by random, round-robin, or hash.
   """
+  @spec select_node([node()], :random | :round_robin | :hash, {atom(), any()}) :: node()
   def select_node(nodes, strategy, {module, data}) do
     case strategy do
       :random -> Enum.random(nodes)
@@ -16,12 +17,15 @@ defmodule EasyRpc.NodeUtils do
     end
   end
 
+  ## Private functions ##
+
   defp get_hash_order(key, num_partitions) when num_partitions > 0 do
-    hash_value = :erlang.phash2(key, num_partitions)
+    :erlang.phash2(key, num_partitions)
   end
 
   defp get_round_robin_order(nodes, module) do
     current_index = (Process.get({:easy_rpc, :round_robin, module}) || 0) + 1
+    current_index = if current_index >= length(nodes), do: 0, else: current_index
     Process.put({:easy_rpc, :round_robin, module}, current_index)
     Enum.at(nodes, current_index)
   end

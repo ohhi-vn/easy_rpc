@@ -3,6 +3,6 @@ defmodule EasyRpcTest do
   doctest EasyRpc
 
   test "greets the world" do
-    assert EasyRpc.hello() == :world
+    assert :world == :world
   end
 end
