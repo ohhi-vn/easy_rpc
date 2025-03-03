@@ -25,8 +25,7 @@ defmodule SimpleExample.MixProject do
   defp deps do
     [
       {:libcluster, "~> 3.5"},
-      {:easy_rpc, path: "~> 0.1.3"} #path: "../.."}
-
+      {:easy_rpc,  "~> 0.1.4"} #path: "../.."}
     ]
   end
 end

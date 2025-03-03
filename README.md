@@ -30,7 +30,7 @@ User need separate config for each wrapper, and put it in config.exs
 config :app_name, :wrapper_name,
   nodes: [:"test1@test.local"],
   error_handling: true,
-  select_node_mode: :random,
+  select_mode: :random,
   module: TargetApp.Interface.Api,
   functions: [
     # {function_name, arity, options}
