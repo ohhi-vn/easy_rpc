@@ -66,4 +66,10 @@ end
 {:ok, result} = DataHelper.get_data("my_key")
 ```
 
-For details please go to module's docs.
+For more details please go to module's docs.
+
+## Example
+
+You can go to example folder to see how config & how to wrap a remote module.
+
+Go to [Github](https://github.com/ohhi-vn/easy_rpc/tree/main/example) and follow the README in each sub folder.

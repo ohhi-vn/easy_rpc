@@ -4,7 +4,12 @@ This will use `easy_rpc` to call to `RemoteNode.Interface`.
 
 ## Guide
 
-Need to run with `simple_example` to test.
+Need to run with `remote_node` to test.
+Follow README.md in `remote_node` to start remote node.
+
+config for wrapper in config.exs file. Check config path `config :simple_example, :remote_wrapper`.
+
+Wrapper module is used in `remote_wrapper.ex` file.
 
 ```Elixir
 mix deps.get
