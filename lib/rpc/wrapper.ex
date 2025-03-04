@@ -28,7 +28,7 @@ defmodule EasyRpc.RpcWrapper do
       # {function_name, arity, options \\ []}
       {:get_data, 1},
       {:put_data, 1, error_handling: false},
-      {:clear, 2, [new_name: :clear_data]},
+      {:clear, 2, [new_name: :clear_data, private: true]},
       {:put_data, 1, [new_name: :put_with_retry, retry: 3]}
     ]
   ```
@@ -41,8 +41,9 @@ defmodule EasyRpc.RpcWrapper do
   `:select_mode` Select node mode, support for random, round_robin, hash.
   `:functions` List of functions, each function is a tuple {function_name, arity} or {function_name, new_name, arity, opts}.
   `:options` Keyword of options, including new_name, retry, error_handling. Ex: [new_name: :clear_data, retry: 0, error_handling: true].
-    If retry is set, the function will retry n times when error occurs and error_handling will be applied.
-    If error_handling is set, the function will catch all exceptions and return {:error, reason}.
+      If retry is set, the function will retry n times when error occurs and error_handling will be applied.
+      If error_handling is set, the function will catch all exceptions and return {:error, reason}.
+  `:private` If set to true, the function will be defined as private function. Default is false (public function).
 
   ## RpcWrapper
 
@@ -74,7 +75,7 @@ defmodule EasyRpc.RpcWrapper do
 
   alias :erpc, as: Rpc
 
-  @fun_opts [:new_name, :retry, :error_handling]
+  @fun_opts [:new_name, :retry, :error_handling, :private]
   @select_strategies [:random, :round_robin, :hash]
 
   @fun_defaults_options [retry: 0]
@@ -109,6 +110,8 @@ defmodule EasyRpc.RpcWrapper do
           {fun, 0, fun_opts} ->
               fun_name = Keyword.get(fun_opts, :new_name, fun)
               fun_retry = Keyword.get(fun_opts, :retry, 0)
+              fun_is_private = Keyword.get(fun_opts, :private, false)
+
               # always use error_handling if retry > 0
               fun_error_handling =
                 if fun_retry > 0 do
@@ -119,14 +122,28 @@ defmodule EasyRpc.RpcWrapper do
 
               case fun_error_handling do
                 true ->
-                  def unquote(fun_name)() do
-                    RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module),
-                      unquote(fun)}, [], unquote(rpc_select_strategy), unquote(fun_retry))
+                  if fun_is_private do
+                    defp unquote(fun_name)() do
+                      RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module),
+                        unquote(fun)}, [], unquote(rpc_select_strategy), unquote(fun_retry))
+                    end
+                  else
+                    def unquote(fun_name)() do
+                      RpcWrapper.rpc_call_error_handling({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module),
+                        unquote(fun)}, [], unquote(rpc_select_strategy), unquote(fun_retry))
+                    end
                   end
                 false ->
-                  def unquote(fun_name)() do
-                    RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)},
-                      [], unquote(rpc_select_strategy))
+                  if fun_is_private do
+                    defp unquote(fun_name)() do
+                      RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)},
+                        [], unquote(rpc_select_strategy))
+                    end
+                  else
+                    def unquote(fun_name)() do
+                      RpcWrapper.rpc_call({unquote(rpc_wrapper_nodes), unquote(rpc_wrapper_module), unquote(fun)},
+                        [], unquote(rpc_select_strategy))
+                    end
                   end
               end
 

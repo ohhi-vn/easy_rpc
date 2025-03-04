@@ -35,7 +35,7 @@ defmodule EasyRpc.MixProject do
   end
 
   defp description() do
-    "A library for wrapping rpc call from a remote module to call like local function. The library uses macro to create a local function (declare by config)."
+    "A library for wrapping rpc call from a remote module to call like local function. The library uses macro to create a local function (by declare config)."
   end
 
   defp package() do

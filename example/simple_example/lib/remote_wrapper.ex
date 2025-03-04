@@ -10,4 +10,8 @@ defmodule SimpleExample.Local do
   # in other module you can call remote function like:
   # SimpleExample.Local.say_hello()
 
+  def hello() do
+    # call remote function
+    private_hello()
+  end
 end

@@ -21,10 +21,10 @@ config :libcluster,
     select_mode: :round_robin,
     module: RemoteNode.Interface,
     functions: [
-      # {function_name, arity}
+      # {function_name, arity, opts}
       {:say_hello, 0},
       {:say_hello_to, 1},
-      # {function_name, arity, opts}
+      {:say_hello, 0, [new_name: :private_hello, private: true]},
       {:say_hello_to_with_age, 2, [new_name: :hello_with_name_age]},
       {:raise_exception, 0, [new_name: :fail, retry: 1]}
     ]

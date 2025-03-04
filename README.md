@@ -12,7 +12,7 @@ Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.1.3"}
+    {:easy_rpc, "~> 0.1.5"}
   ]
 end
 ```
@@ -37,6 +37,7 @@ config :app_name, :wrapper_name,
     {:get_data, 1},
     {:put_data, 1, error_handling: false},
     {:clear, 2, new_name: :clear_data, retry: 3},
+    {:clear_all, 0, new_name: :clear_all, private: true}, # wrap to private function.
   ]
 ```
 
