@@ -12,7 +12,7 @@ Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.1.5"}
+    {:easy_rpc, "~> 0.1.6"}
   ]
 end
 ```
