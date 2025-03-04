@@ -12,7 +12,7 @@ Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.1.6"}
+    {:easy_rpc, "~> 0.1.7"}
   ]
 end
 ```
@@ -73,4 +73,4 @@ For more details please go to module's docs.
 
 You can go to example folder to see how config & how to wrap a remote module.
 
-Go to [Github](https://github.com/ohhi-vn/easy_rpc/tree/main/example) and follow the README in each sub folder.
+Go to [Github](https://github.com/ohhi-vn/easy_rpc/tree/main/example) and follow the README in sub folders.

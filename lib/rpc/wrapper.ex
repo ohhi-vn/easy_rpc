@@ -36,13 +36,19 @@ defmodule EasyRpc.RpcWrapper do
   Explain config:
 
   `:nodes` List of nodes, or {module, function, args} on local node.
+
   `:module` Module of remote functions on remote node.
+
   `:error_handling` Enable error handling (catch all) or not.
+
   `:select_mode` Select node mode, support for random, round_robin, hash.
+
   `:functions` List of functions, each function is a tuple {function_name, arity} or {function_name, new_name, arity, opts}.
+
   `:options` Keyword of options, including new_name, retry, error_handling. Ex: [new_name: :clear_data, retry: 0, error_handling: true].
-      If retry is set, the function will retry n times when error occurs and error_handling will be applied.
-      If error_handling is set, the function will catch all exceptions and return {:error, reason}.
+  If retry is set, the function will retry n times when error occurs and error_handling will be applied.
+  If error_handling is set, the function will catch all exceptions and return {:error, reason}.
+
   `:private` If set to true, the function will be defined as private function. Default is false (public function).
 
   ## RpcWrapper
@@ -69,7 +75,7 @@ defmodule EasyRpc.RpcWrapper do
   ```
 
   Explain:
-  `:otp_app`, name of application will add config
+  `:otp_app`, name of application will add config.
   `:config_name`, name of config in application config.
   """
 
