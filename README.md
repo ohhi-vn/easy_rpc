@@ -5,6 +5,9 @@
 
 This library help developer easy to wrap a remote procedure call (rpc, library uses Erlang `:erpc` module).
 
+EasyRpc supports some basic features for wrapping rpc: retry, timeout, error_handling.
+Each function can has seperated options or use global options (config for all function in a module).
+
 ## Installation
 
 Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
@@ -12,7 +15,7 @@ Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.1.7"}
+    {:easy_rpc, "~> 0.2.0"}
   ]
 end
 ```
@@ -41,7 +44,7 @@ config :app_name, :wrapper_name,
   ]
 ```
 
-### Add to local module
+### Wrap to local module
 
 by using `use EasyRpc.RpcWrapper` in your module, you can call remote functions as local functions.
 
@@ -63,7 +66,7 @@ defmodule DataHelper do
   end
 end
 
-# Or call from other module
+# Or call from other module like
 {:ok, result} = DataHelper.get_data("my_key")
 ```
 
@@ -71,6 +74,6 @@ For more details please go to module's docs.
 
 ## Example
 
-You can go to example folder to see how config & how to wrap a remote module.
+You can go to example folder to see how EasyRpc work, check config & run and see.
 
 Go to [Github](https://github.com/ohhi-vn/easy_rpc/tree/main/example) and follow the README in sub folders.

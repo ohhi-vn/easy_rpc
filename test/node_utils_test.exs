@@ -9,11 +9,24 @@ defmodule EasyRpc.NodeUtilsTest do
   @nodes_2 [:node1, :node2]
 
   test "select random" do
-    assert NodeUtils.select_node(@nodes, :random, {nil, nil}) in @nodes
+    for _ <- 1..100 do
+      assert NodeUtils.select_node(@nodes, :random, {nil, nil}) in @nodes
+    end
   end
 
   test "select hash" do
-    assert NodeUtils.select_node(@nodes, :hash, {nil, nil}) in @nodes
+    for _ <- 1..100 do
+      assert NodeUtils.select_node(@nodes, :hash, {nil, nil}) in @nodes
+    end
+  end
+
+  test "same hash if has same data" do
+    node1 = NodeUtils.select_node(@nodes, :hash, {:hello, "world"})
+    assert node1 in @nodes
+    node2 = NodeUtils.select_node(@nodes, :hash,  {:hello, "world"})
+    assert node2 in @nodes
+
+    assert node1 == node2
   end
 
   test "select round-robin" do
