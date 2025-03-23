@@ -76,4 +76,4 @@ For more details please go to module's docs.
 
 You can go to example folder to see how EasyRpc work, check config & run and see.
 
-Go to [Github](https://github.com/ohhi-vn/easy_rpc/tree/main/example) and follow the README in sub folders.
+Go to [lib_examples on Github](https://github.com/ohhi-vn/lib_examples/tree/main/easy_rpc) and follow the README in sub folders.
