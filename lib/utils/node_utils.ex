@@ -8,13 +8,17 @@ defmodule EasyRpc.NodeUtils do
   @doc """
   Helper function to calculate target node by random, round-robin, or hash.
   """
-  @spec select_node([node()], :random | :round_robin | :hash, {atom(), any()}) :: node()
-  def select_node(nodes, strategy, {module, data}) do
+  @spec select_node([node()] | {atom(), atom(), list()}, :random | :round_robin | :hash, {atom(), any()}) :: node()
+  def select_node(nodes, strategy, {module, data}) when is_list(nodes) do
     case strategy do
       :random -> Enum.random(nodes)
       :round_robin -> get_round_robin_order(nodes, module)
       :hash -> Enum.at(nodes, get_hash_order(data, length(nodes)))
     end
+  end
+  def select_node({module, function, args}, strategy, data) do
+    nodes = apply(module, function, args)
+    select_node(nodes, strategy, data)
   end
 
   ## Private functions ##

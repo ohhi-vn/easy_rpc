@@ -15,7 +15,7 @@ Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.2.0"}
+    {:easy_rpc, "~> 0.2.1"}
   ]
 end
 ```
@@ -31,7 +31,7 @@ User need separate config for each wrapper, and put it in config.exs
 
 ```Elixir
 config :app_name, :wrapper_name,
-  nodes: [:"test1@test.local"],
+  nodes: [:"test1@test.local"], # or using function like nodes: {Module, Fun, Args}
   error_handling: true,
   select_mode: :random,
   module: TargetApp.Interface.Api,
