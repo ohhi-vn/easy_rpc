@@ -8,6 +8,8 @@ defmodule EasyRpc.NodeUtilsTest do
 
   @nodes_2 [:node1, :node2]
 
+  @mfa {__MODULE__, :get_node, []}
+
   test "select random" do
     for _ <- 1..100 do
       assert NodeUtils.select_node(@nodes, :random, {nil, nil}) in @nodes
@@ -39,5 +41,14 @@ defmodule EasyRpc.NodeUtilsTest do
     assert node == :node2
     node = NodeUtils.select_node(@nodes_2, :round_robin, {__MODULE__, nil})
     assert node == :node1
+  end
+
+  test "select node with module" do
+    node = NodeUtils.select_node(@mfa, :round_robin, {__MODULE__, nil})
+    assert node in @nodes
+  end
+
+  def get_node do
+    [:node1, :node2]
   end
 end

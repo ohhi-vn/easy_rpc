@@ -15,12 +15,15 @@ Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.2.1"}
+    {:easy_rpc, "~> 0.3.0"}
   ]
 end
 ```
 
-## Usage
+## Usage - Config way
+
+This is an example for declare by config in config.exs file.
+For this way you need to work with config than module.
 
 Follow steps
 
@@ -68,6 +71,34 @@ end
 
 # Or call from other module like
 {:ok, result} = DataHelper.get_data("my_key")
+```
+
+## Usage - defrpc
+
+### Add Configs
+
+```Elixir
+config :simple_example, :remote_defrpc,
+  nodes: [:"remote@127.0.0.1"],  # or {ClusterHelper, :get_nodes, [:remote_api]},
+  select_mode: :round_robin
+```
+
+### Declare functions
+
+```Elixir
+defmodule Remote
+  use EasyRpc.DefRpc,
+    otp_app: :simple_example,
+    config_name: :remote_defrpc,
+    # Remote module name
+    module: RemoteNode.Interface,
+    timeout: 1000
+
+  defrpc :get_data
+  defrpc :put_data, args: 1
+  defrpc :clear, args: 2, as: :clear_data, private: true
+  defrpc :put_data, args: [:name], new_name: :put_with_retry, retry: 3, timeout: 1000
+end
 ```
 
 For more details please go to module's docs.
