@@ -26,6 +26,7 @@ defmodule EasyRpc.RpcWrapper do
     # or nodes: {MyModule, :get_nodes, []}
     error_handling: true, # enable error handling, global setting for all functions.
     select_mode: :random, # select node mode, global setting for all functions.
+    sticky_node: false, # sticky node, global setting for all functions.
     timeout: 3_000, # timeout(ms) for each call, global setting for all functions, default is 5000ms.
     module: TargetApp.RemoteModule,
     functions: [
@@ -57,6 +58,8 @@ defmodule EasyRpc.RpcWrapper do
 
   `:private` If set to true, the function will be defined as private function. Default is false (public function).
 
+  Note: `:sticky_node` & `:round_robin` are supported for rpc per process only.
+
   ### RpcWrapper
 
   Usage:
@@ -86,85 +89,74 @@ defmodule EasyRpc.RpcWrapper do
   `:config_name`, name of config in application config.
   """
 
-  @fun_opts [:new_name, :retry, :error_handling, :private, :timeout]
-  @select_strategies [:random, :round_robin, :hash]
-
-  @fun_defaults_options [retry: 0]
-
   require Logger
 
-  alias EasyRpc.RpcWrapperError
-
-  alias EasyRpc.Utils.{RpcUtils, RpcCall}
+  alias EasyRpc.{WrapperConfig, RpcCall}
 
   defmacro __using__(opts) do
     # using location for easily to debug & development.
     quote location: :keep, bind_quoted: [opts: opts] do
-      rpc_wrapper_app_name = Keyword.get(opts, :otp_app)
-      rpc_wrapper_config_name = Keyword.get(opts, :config_name)
+      rpc_wrapper_config = WrapperConfig.load_config!(Keyword.get(opts, :otp_app), Keyword.get(opts, :config_name))
 
-      if rpc_wrapper_app_name == nil or rpc_wrapper_config_name == nil do
-        raise RpcWrapperError, "rpc_wrapper, required :otp_app and :config_name"
-      end
-
-      rpc_wrapper_nodes = quote do RpcUtils.get_config!(unquote(rpc_wrapper_app_name), unquote(rpc_wrapper_config_name), :nodes) end
-      rpc_wrapper_module = quote do RpcUtils.get_config!(unquote(rpc_wrapper_app_name), unquote(rpc_wrapper_config_name), :module) end
-      rpc_wrapper_functions = RpcUtils.get_config!(rpc_wrapper_app_name, rpc_wrapper_config_name, :functions)
-
-      rpc_select_strategy = quote do RpcUtils.get_config!(unquote(rpc_wrapper_app_name), unquote(rpc_wrapper_config_name), :select_mode) end
-      rpc_error_handling =  RpcUtils.get_config!(rpc_wrapper_app_name, rpc_wrapper_config_name, :error_handling)
-      rpc_timeout =  RpcUtils.get_config!(rpc_wrapper_app_name, rpc_wrapper_config_name, :timeout)
-
-      for fun_info <- rpc_wrapper_functions do
+      for fun_info <- rpc_wrapper_config.functions do
+        fun_info =
+          case fun_info do
+            {fun, arity, opts} when is_list(opts) ->
+              {fun, arity, opts}
+            {fun, arity} ->
+              {fun, arity, []}
+            other ->
+              raise EasyRpc.ConfigError, "Invalid function config: #{inspect(other)}"
+          end
         {fun, _, fun_opts} = fun_info
 
+        # for define function
         fun_name = Keyword.get(fun_opts, :new_name, fun)
-        fun_retry = Keyword.get(fun_opts, :retry, 0)
         fun_is_private = Keyword.get(fun_opts, :private, false)
-        fun_timeout = Keyword.get(fun_opts, :timeout, rpc_timeout)
+
+        # for option
+        fun_retry = Keyword.get(fun_opts, :retry, rpc_wrapper_config.retry)
+        fun_timeout = Keyword.get(fun_opts, :timeout, rpc_wrapper_config.timeout)
 
         # always use error_handling if retry > 0
         fun_error_handling =
           if fun_retry > 0 do
             true
           else
-            Keyword.get(fun_opts, :error_handling, rpc_error_handling)
+            Keyword.get(fun_opts, :error_handling, rpc_wrapper_config.error_handling)
           end
+
+        # every function has its options.
+        fun_config =
+          Macro.escape( %WrapperConfig{
+            rpc_wrapper_config |
+            retry: fun_retry,
+            timeout: fun_timeout,
+            error_handling: fun_error_handling
+          })
 
         case fun_info do
           # funtion without arguments
           {fun, 0, fun_opts} ->
               if fun_is_private do
+
                 defp unquote(fun_name)() do
-                  RpcCall.rpc_call(
-                    {unquote(fun_error_handling), unquote(fun_retry)},
-                    {unquote(rpc_wrapper_module), unquote(fun), []},
-                    {unquote(rpc_wrapper_nodes), unquote(rpc_select_strategy), unquote(fun_timeout)})
+                  RpcCall.rpc_call(unquote(fun_config), {unquote(fun), []})
                 end
               else
                 def unquote(fun_name)() do
-                  RpcCall.rpc_call(
-                    {unquote(fun_error_handling), unquote(fun_retry)},
-                    {unquote(rpc_wrapper_module), unquote(fun), []},
-                    {unquote(rpc_wrapper_nodes), unquote(rpc_select_strategy), unquote(fun_timeout)})
+                  RpcCall.rpc_call(unquote(fun_config), {unquote(fun), []})
                 end
               end
 
           {fun, arity, fun_opts} ->
             if fun_is_private do
-
               defp unquote(fun_name)(unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ) do
-                RpcCall.rpc_call(
-                  {unquote(fun_error_handling), unquote(fun_retry)},
-                  {unquote(rpc_wrapper_module), unquote(fun),  [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil)))]},
-                  {unquote(rpc_wrapper_nodes), unquote(rpc_select_strategy), unquote(fun_timeout)})
+                RpcCall.rpc_call(unquote(fun_config), {unquote(fun),  [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil)))]})
               end
             else
               def unquote(fun_name)(unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil))) ) do
-                  RpcCall.rpc_call(
-                    {unquote(fun_error_handling), unquote(fun_retry)},
-                    {unquote(rpc_wrapper_module), unquote(fun),  [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil)))]},
-                    {unquote(rpc_wrapper_nodes), unquote(rpc_select_strategy), unquote(fun_timeout)})
+                  RpcCall.rpc_call(unquote(fun_config), {unquote(fun),  [unquote_splicing(Enum.map(1..arity, &Macro.var(:"arg_#{&1}", nil)))]})
               end
             end
         end

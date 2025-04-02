@@ -3,10 +3,12 @@
 
 # EasyRpc
 
-This library help developer easy to wrap a remote procedure call (rpc, library uses Erlang `:erpc` module).
+This library help developer easy to wrap a remote procedure call (rpc, library uses Erlang `:erpc` module) to local function.
 
 EasyRpc supports some basic features for wrapping rpc: retry, timeout, error_handling.
-Each function can has seperated options or use global options (config for all function in a module).
+Each function can has seperated options or use global options (in a module).
+
+Can use EasyRpc with [ClusterHelper](https://hex.pm/packages/cluster_helper) for calling a rpc in a dynamic Elixir cluster.
 
 ## Installation
 
@@ -15,14 +17,51 @@ Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.3.0"}
+    {:easy_rpc, "~> 0.4.0"}
   ]
+end
+```
+
+## Usage - defrpc way
+
+In this way, you need to add config for node list & its select_mode.
+The config can add in compile time or runtime or using {module, function arguments} for selecting by function.
+
+For wrapping a remote function to local module you need to use macro `defrpc`.
+
+### Add Configs
+
+```Elixir
+config :simple_example, :remote_defrpc,
+  nodes: [:"remote@127.0.0.1"],  # or {ClusterHelper, :get_nodes, [:remote_api]},
+  select_mode: :round_robin,
+  sticky_node: true
+```
+
+Current version, `:round_robin` & `:sticky_node` are worked for process only.
+
+### Declare functions
+
+```Elixir
+defmodule Remote
+  use EasyRpc.DefRpc,
+    otp_app: :simple_example,
+    config_name: :remote_defrpc,
+    # Remote module name
+    module: RemoteNode.Interface,
+    timeout: 1000
+
+  defrpc :get_data
+  defrpc :put_data, args: 1
+  defrpc :clear, args: 2, as: :clear_data, private: true
+  defrpc :put_data, args: [:name], new_name: :put_with_retry, retry: 3, timeout: 1000
 end
 ```
 
 ## Usage - Config way
 
 This is an example for declare by config in config.exs file.
+All function & node info (excepted `nodes: {module, function, arguments}) are generated at compile time.
 For this way you need to work with config than module.
 
 Follow steps
@@ -71,34 +110,6 @@ end
 
 # Or call from other module like
 {:ok, result} = DataHelper.get_data("my_key")
-```
-
-## Usage - defrpc
-
-### Add Configs
-
-```Elixir
-config :simple_example, :remote_defrpc,
-  nodes: [:"remote@127.0.0.1"],  # or {ClusterHelper, :get_nodes, [:remote_api]},
-  select_mode: :round_robin
-```
-
-### Declare functions
-
-```Elixir
-defmodule Remote
-  use EasyRpc.DefRpc,
-    otp_app: :simple_example,
-    config_name: :remote_defrpc,
-    # Remote module name
-    module: RemoteNode.Interface,
-    timeout: 1000
-
-  defrpc :get_data
-  defrpc :put_data, args: 1
-  defrpc :clear, args: 2, as: :clear_data, private: true
-  defrpc :put_data, args: [:name], new_name: :put_with_retry, retry: 3, timeout: 1000
-end
 ```
 
 For more details please go to module's docs.

@@ -1,5 +1,6 @@
 defmodule EasyRpc.RpcWrapperTest do
   use ExUnit.Case
+
   doctest EasyRpc
 
   alias EasyRpc.RpcWrapper
@@ -40,6 +41,7 @@ defmodule EasyRpc.RpcWrapperTest do
     Application.put_env(:easy_rpc_test, :config2, config2)
   end
 
+  @tag :test_1
   test "wrap a local module test" do
     IO.puts "Test config:"
     IO.puts inspect(Application.get_env(:easy_rpc_test, :config1))

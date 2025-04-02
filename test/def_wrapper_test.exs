@@ -59,7 +59,7 @@ defmodule EasyRpc.DefRpcTest do
     IO.puts inspect(Application.get_env(:easy_rpc_test, :config1))
 
     defmodule WrappedModule do
-      use EasyRpc.DefRpc,
+      use DefRpc,
         otp_app: :easy_rpc_test,
         config_name: :config1,
         # Remote module name

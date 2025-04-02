@@ -12,15 +12,22 @@ defmodule EasyRpc.DefRpc do
 
   ```Elixir
   config :simple_example, :remote_defrpc,
-    nodes: [:"remote@127.0.0.1"],  # or {ClusterHelper, :get_nodes, [:remote_api]},
-    select_mode: :round_robin
+    nodes: [:"remote@127.0.0.1"],  # or using {module, function, args} like: {ClusterHelper, :get_nodes, [:remote_api]},
+    select_mode: :round_robin # default is :random
+    sticky_node: true # default is false
   ```
 
   Explain config:
 
   `:nodes` List of nodes, or {module, function, args} on local node.
 
-  `:select_mode` Select node mode, support for  [:random, :round_robin, :hash].
+  `:select_mode` Select node mode, default is :random. Support for  [:random, :round_robin, :hash].
+    :round_robin will use per process to select node.
+    :hash will using :erlang.phash2 to select node in list, data is arguments of function.
+
+  `:sticky_node` If set to true, the node will be sticky for each call. Default is false.
+
+  Note: `sticky_node` & `round_robin` are supported for rpc per process only.
 
   ### Using DefRpc in your module
 
@@ -75,9 +82,7 @@ defmodule EasyRpc.DefRpc do
 
   """
 
-  alias EasyRpc.RpcWrapperError
-
-  alias EasyRpc.Utils.{RpcCall}
+  alias EasyRpc.{RpcWrapperError, WrapperConfig, RpcCall}
 
   require Logger
 
@@ -89,23 +94,9 @@ defmodule EasyRpc.DefRpc do
       # get options from `use`
       @rpc_wrapper_app_name Keyword.get(opts, :otp_app)
       @rpc_wrapper_config_name Keyword.get(opts, :config_name)
-      @rpc_wrapper_module  Keyword.get(opts, :module)
-      @rpc_fun_error_handling  Keyword.get(opts, :error_handling, false)
-      @rpc_fun_timeout  Keyword.get(opts, :timeout, 5000)
-      @rpc_fun_retry  Keyword.get(opts, :retry, 0)
       @rpc_fun_private Keyword.get(opts, :private, false)
 
-      cond do
-        @rpc_wrapper_app_name == nil ->
-          raise RpcWrapperError, "EasyRpc.DefRpc, required option :otp_app"
-
-        @rpc_wrapper_config_name == nil  ->
-          raise RpcWrapperError, "EasyRpc.DefRpc, required option :config_name"
-
-        @rpc_wrapper_module == nil ->
-         raise RpcWrapperError, "EasyRpc.DefRpc, required option :module"
-        true -> :ok
-      end
+      @rpc_wrapper_config WrapperConfig.load_from_options!(opts)
     end
   end
 
@@ -114,9 +105,10 @@ defmodule EasyRpc.DefRpc do
     quote bind_quoted: [fun: fun, fun_opts: fun_opts] do
       fun_orig = fun
       fun_name = Keyword.get(fun_opts, :as, fun_orig)
-      fun_retry = Keyword.get(fun_opts, :retry, @rpc_fun_retry)
       fun_is_private = Keyword.get(fun_opts, :private, @rpc_fun_private)
-      fun_timeout = Keyword.get(fun_opts, :timeout, @rpc_fun_timeout)
+
+      fun_timeout = Keyword.get(fun_opts, :timeout, @rpc_wrapper_config.timeout)
+      fun_retry = Keyword.get(fun_opts, :retry, @rpc_wrapper_config.retry)
 
       fun_arity =
         case Keyword.get(fun_opts, :args, 0) do
@@ -134,68 +126,49 @@ defmodule EasyRpc.DefRpc do
         if fun_retry > 0 do
           true
         else
-          Keyword.get(fun_opts, :error_handling, @rpc_fun_error_handling)
+          Keyword.get(fun_opts, :error_handling, @rpc_wrapper_config.error_handling)
         end
+
+      fun_config = Macro.escape(%WrapperConfig{@rpc_wrapper_config | timeout: fun_timeout, retry: fun_retry, error_handling: fun_error_handling})
 
       case fun_arity do
         0 ->
           # funtion without arguments
-
-            if fun_is_private do
-              defp unquote(fun_name)() do
-                RpcCall.rpc_call_dynamic(
-                  {unquote(fun_error_handling), unquote(fun_retry),  unquote(fun_timeout)},
-                  {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
-                  {@rpc_wrapper_module, unquote(fun_orig), []}
-                )
-              end
-            else
-              def unquote(fun_name)() do
-                RpcCall.rpc_call_dynamic(
-                  {unquote(fun_error_handling), unquote(fun_retry),  unquote(fun_timeout)},
-                  {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
-                  {@rpc_wrapper_module, unquote(fun_orig), []}
-                )
-              end
+          if fun_is_private do
+            defp unquote(fun_name)() do
+              RpcCall.rpc_call_dynamic(unquote(fun_config), {@rpc_wrapper_app_name, @rpc_wrapper_config_name}, {unquote(fun_orig), []})
             end
+          else
+            def unquote(fun_name)() do
+              RpcCall.rpc_call_dynamic(unquote(fun_config), {@rpc_wrapper_app_name, @rpc_wrapper_config_name}, {unquote(fun_orig), []})
+            end
+          end
 
         n when is_integer(n) ->
           # function with arguments
           if fun_is_private do
             defp unquote(fun_name)(unquote_splicing(Enum.map(1..n, &Macro.var(:"arg_#{&1}", nil)))) do
-              RpcCall.rpc_call_dynamic(
-                {unquote(fun_error_handling), unquote(fun_retry),  unquote(fun_timeout)},
-                {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
-                {@rpc_wrapper_module, unquote(fun_orig), [unquote_splicing(Enum.map(1..n, &Macro.var(:"arg_#{&1}", nil)))]}
-              )
+              RpcCall.rpc_call_dynamic(unquote(fun_config), {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
+                {unquote(fun_orig), [unquote_splicing(Enum.map(1..n, &Macro.var(:"arg_#{&1}", nil)))]})
             end
 
           else
             def unquote(fun_name)(unquote_splicing(Enum.map(1..n, &Macro.var(:"arg_#{&1}", nil)))) do
-              RpcCall.rpc_call_dynamic(
-                {unquote(fun_error_handling), unquote(fun_retry),  unquote(fun_timeout)},
-                {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
-                {@rpc_wrapper_module, unquote(fun_orig), [unquote_splicing(Enum.map(1..n, &Macro.var(:"arg_#{&1}", nil)))]}
-              )
+              RpcCall.rpc_call_dynamic(unquote(fun_config), {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
+                {unquote(fun_orig), [unquote_splicing(Enum.map(1..n, &Macro.var(:"arg_#{&1}", nil)))]})
             end
           end
 
         list_args ->
           if fun_is_private do
             defp unquote(fun_name)(unquote_splicing(Enum.map(list_args, &Macro.var(&1, nil)))) do
-              RpcCall.rpc_call_dynamic(
-                {unquote(fun_error_handling), unquote(fun_retry),  unquote(fun_timeout)},
-                {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
-                {@rpc_wrapper_module, unquote(fun_orig), [unquote_splicing(Enum.map(list_args, &Macro.var(&1, nil)))]}
-              )
+              RpcCall.rpc_call_dynamic( unquote(fun_config), {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
+                {unquote(fun_orig), [unquote_splicing(Enum.map(list_args, &Macro.var(&1, nil)))]})
             end
           else
             def unquote(fun_name)(unquote_splicing(Enum.map(list_args, &Macro.var(&1, nil)))) do
-              RpcCall.rpc_call_dynamic(
-                {unquote(fun_error_handling), unquote(fun_retry),  unquote(fun_timeout)},
-                {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
-                {@rpc_wrapper_module, unquote(fun_orig), [unquote_splicing(Enum.map(list_args, &Macro.var(&1, nil)))]}
-              )
+              RpcCall.rpc_call_dynamic(unquote(fun_config), {@rpc_wrapper_app_name, @rpc_wrapper_config_name},
+                {unquote(fun_orig), [unquote_splicing(Enum.map(list_args, &Macro.var(&1, nil)))]})
             end
           end
         end
