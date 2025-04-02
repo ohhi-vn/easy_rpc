@@ -61,7 +61,7 @@ end
 ## Usage - Config way
 
 This is an example for declare by config in config.exs file.
-All function & node info (excepted `nodes: {module, function, arguments}) are generated at compile time.
+All function & node info (excepted `nodes: {module, function, arguments}`) are generated at compile time.
 For this way you need to work with config than module.
 
 Follow steps
