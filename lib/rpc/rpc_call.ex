@@ -47,15 +47,10 @@ defmodule EasyRpc.RpcCall do
 
     try do
       Logger.debug(prefix_log <> ", call")
+      result = Rpc.call(node, config.module, fun, args, config.timeout)
+      Logger.debug(prefix_log <> ", result: #{inspect result}")
 
-      case Rpc.call(node, config.module, fun, args, config.timeout) do
-        {:error, reason} ->
-          Logger.error(prefix_log <> ", error: #{inspect(reason)}")
-          false
-        result ->
-          Logger.info(prefix_log <> ", result: #{inspect result}")
-          {:ok, result}
-      end
+      {:ok, result}
     rescue
       e ->
         if config.retry > 0 do
