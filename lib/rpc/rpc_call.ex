@@ -21,7 +21,7 @@ defmodule EasyRpc.RpcCall do
   def rpc_call_dynamic(%WrapperConfig{} = config, {config_app, config_name}, {_, _} = fun_args) do
     node_selector = NodeSelector.load_config!(config_app, config_name)
 
-    config = %WrapperConfig{config | node_selector: node_selector}
+    config = %{config | node_selector: node_selector}
 
     case config.error_handling do
       true ->
@@ -55,7 +55,7 @@ defmodule EasyRpc.RpcCall do
       e ->
         if config.retry > 0 do
           Logger.warning(prefix_log <> ", retry: #{inspect(config.retry)} (decrease), error: #{inspect(e)}")
-          config = %WrapperConfig{config | retry: config.retry - 1}
+          config = %{config | retry: config.retry - 1}
           rpc_call_error_handling(config, fun_args)
         else
           Logger.error(prefix_log <> ", error: #{inspect(e)}")

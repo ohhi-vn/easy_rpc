@@ -50,7 +50,7 @@ defmodule EasyRpc.NodeSelector do
 
   @doc false
   def update_id(%NodeSelector{} = selector, id) do
-    %NodeSelector{selector | id: id}
+    %{selector | id: id}
   end
 
   @doc false

@@ -4,7 +4,7 @@ defmodule EasyRpc.MixProject do
   def project do
     [
       app: :easy_rpc,
-      version: "0.4.2",
+      version: "0.5.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -29,8 +29,8 @@ defmodule EasyRpc.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ex_doc, "~> 0.24", only: :dev, runtime: false},
-      {:benchee, "~> 1.3", only: :dev},
+      {:ex_doc, "~> 0.38", only: :dev, runtime: false},
+      {:benchee, "~> 1.4", only: :dev},
     ]
   end
 

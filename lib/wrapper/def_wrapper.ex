@@ -129,7 +129,7 @@ defmodule EasyRpc.DefRpc do
           Keyword.get(fun_opts, :error_handling, @rpc_wrapper_config.error_handling)
         end
 
-      fun_config = Macro.escape(%WrapperConfig{@rpc_wrapper_config | timeout: fun_timeout, retry: fun_retry, error_handling: fun_error_handling})
+      fun_config = Macro.escape(%{@rpc_wrapper_config | timeout: fun_timeout, retry: fun_retry, error_handling: fun_error_handling})
 
       case fun_arity do
         0 ->
