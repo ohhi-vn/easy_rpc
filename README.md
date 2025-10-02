@@ -119,3 +119,22 @@ For more details please go to module's docs.
 You can go to example folder to see how EasyRpc work, check config & run and see.
 
 Go to [lib_examples on Github](https://github.com/ohhi-vn/lib_examples/tree/main/easy_rpc) and follow the README in sub folders.
+
+
+## Support AI agents & MCP
+
+Run this command for update guide & rules from deps to repo for supporting ai agents.
+
+```bash
+mix usage_rules.sync AGENTS.md --all \
+  --link-to-folder deps \
+  --inline usage_rules:all
+```
+
+Run this command for enable MCP server
+
+```bash
+mix tidewave
+```
+
+Config MCP for agent `http://localhost:4113/tidewave/mcp`, changes port in `mix.exs` file if needed. Go to [Tidewave](https://hexdocs.pm/tidewave/) for more informations.

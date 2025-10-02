@@ -4,7 +4,7 @@ defmodule EasyRpc.MixProject do
   def project do
     [
       app: :easy_rpc,
-      version: "0.5.0",
+      version: "0.6.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -15,7 +15,8 @@ defmodule EasyRpc.MixProject do
       homepage_url: "https://ohhi.vn",
       docs: docs(),
       description: description(),
-      package: package()
+      package: package(),
+      aliases: aliases()
     ]
   end
 
@@ -31,6 +32,11 @@ defmodule EasyRpc.MixProject do
     [
       {:ex_doc, "~> 0.38", only: :dev, runtime: false},
       {:benchee, "~> 1.4", only: :dev},
+
+      # Support for AI agent
+      {:tidewave, "~> 0.5", only: :dev},
+      {:bandit, "~> 1.8", only: :dev},
+      {:usage_rules, "~> 0.1", only: [:dev]}
     ]
   end
 
@@ -42,7 +48,10 @@ defmodule EasyRpc.MixProject do
     [
       maintainers: ["Manh Van Vu"],
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/ohhi-vn/easy_rpc", "About us" => "https://ohhi.vn/"}
+      links: %{
+        "GitHub" => "https://github.com/ohhi-vn/easy_rpc",
+        "About us" => "https://ohhi.vn/"
+      }
     ]
   end
 
@@ -68,16 +77,30 @@ defmodule EasyRpc.MixProject do
         |> String.split(~r|[-_]|)
         |> Enum.map_join(" ", &String.capitalize/1)
         |> case do
-          "F A Q" ->"FAQ"
+          "F A Q" -> "FAQ"
           no_change -> no_change
         end
 
       {String.to_atom(path),
-        [
-          title: title,
-          default: title == "Guide"
-        ]
-      }
+       [
+         title: title,
+         default: title == "Guide"
+       ]}
     end)
+  end
+
+  defp aliases do
+    [
+      tidewave:
+        "run --no-halt -e 'Agent.start(fn -> Bandit.start_link(plug: Tidewave, port: 4113) end)'",
+      "usage_rules.update": [
+        """
+        usage_rules.sync AGENTS.md --all \
+          --inline usage_rules:all \
+          --link-to-folder deps
+        """
+        |> String.trim()
+      ]
+    ]
   end
 end
