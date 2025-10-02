@@ -10,3 +10,5 @@ erl_crash.dump
 .elixir_ls/
 .tool-versions
 .DS_Store
+IMPROVEMENTS.md
+REVIEW_SUMMARY.md

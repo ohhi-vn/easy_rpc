@@ -1,20 +1,65 @@
 defmodule EasyRpc.RpcError do
-  defexception [:message]
+  @moduledoc """
+  RPC error for EasyRpc.
 
-  alias __MODULE__
+  This module is kept for backward compatibility and delegates to `EasyRpc.Error`.
+
+  ## Examples
+
+      iex> EasyRpc.RpcError.raise_error("Connection failed")
+      ** (EasyRpc.Error) [EasyRpc.Error:rpc_error] Connection failed
+
+  """
+
+  alias EasyRpc.Error
 
   require Logger
 
-  def raise_error(error) when is_binary(error) do
-    raise RpcError, message: error
+  @doc """
+  Raises an RPC error.
+
+  ## Examples
+
+      EasyRpc.RpcError.raise_error("Connection refused")
+      EasyRpc.RpcError.raise_error({:error, :nodedown})
+  """
+  @spec raise_error(String.t() | term()) :: no_return()
+  def raise_error(message) when is_binary(message) do
+    Error.raise!(:rpc_error, message)
   end
 
-  def raise_error(error) do
-    raise RpcError, message: "#{inspect(error)}"
+  def raise_error(term) do
+    Error.raise!(:rpc_error, inspect(term))
   end
 
-  def print(EasyRpc.RpcError) do
-    IO.puts("EasyRpc.RpcError")
+  @doc """
+  Prints the error to stdout.
+
+  ## Examples
+
+      error = EasyRpc.Error.rpc_error("Connection failed")
+      EasyRpc.RpcError.print(error)
+  """
+  @spec print(Error.t()) :: :ok
+  def print(%Error{type: :rpc_error} = error) do
+    IO.puts(Error.format(error))
+  end
+
+  def print(error) do
+    IO.puts("EasyRpc.RpcError: #{inspect(error)}")
+  end
+
+  @doc """
+  Logs the error using Logger.
+
+  ## Examples
+
+      error = EasyRpc.Error.rpc_error("Connection failed")
+      EasyRpc.RpcError.log_error(error)
+  """
+  @spec log_error(Error.t() | term()) :: :ok
+  def log_error(%Error{type: :rpc_error} = error) do
+    Error.log(error, :error)
   end
 
   def log_error(error) do
