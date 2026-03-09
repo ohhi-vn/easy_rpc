@@ -3,127 +3,226 @@
 
 # EasyRpc
 
-This library help developer easy to wrap a remote procedure call (rpc, library uses Erlang `:erpc` module) to local function.
+A library that makes it easy to wrap a remote procedure call (RPC) as a local function.
+EasyRpc uses Erlang's `:erpc` module under the hood and adds retry, timeout, and error-handling support on top.
 
-EasyRpc supports some basic features for wrapping rpc: retry, timeout, error_handling.
-Each function can has seperated options or use global options (in a module).
+Each function can carry its own options, or inherit global options declared at the module level.
+EasyRpc works seamlessly with [ClusterHelper](https://hex.pm/packages/cluster_helper) for dynamic Elixir clusters.
 
-Can use EasyRpc with [ClusterHelper](https://hex.pm/packages/cluster_helper) for calling a rpc in a dynamic Elixir cluster.
+*Note: Collab between human & AI.*
 
 ## Installation
 
-Adding `easy_rpc` library to your list of dependencies in `mix.exs`:
+Add `easy_rpc` to your dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.4.0"}
+    {:easy_rpc, "~> 0.7.0"}
   ]
 end
 ```
 
-## Usage - defrpc way
+---
 
-In this way, you need to add config for node list & its select_mode.
-The config can add in compile time or runtime or using {module, function arguments} for selecting by function.
+## Two Usage Approaches
 
-For wrapping a remote function to local module you need to use macro `defrpc`.
+| | `DefRpc` | `RpcWrapper` |
+|---|---|---|
+| Functions declared | In module via `defrpc` macro | In config file |
+| Node config loaded | At **runtime** per call | At **compile time** |
+| Cluster topology changes | ✅ Picked up automatically | Requires recompile |
+| Best for | Explicit control, dynamic clusters | All-in-config, stable topology |
 
-### Add Configs
+---
 
-```Elixir
-config :simple_example, :remote_defrpc,
-  nodes: [:"remote@127.0.0.1"],  # or {ClusterHelper, :get_nodes, [:remote_api]},
+## Usage — `DefRpc` (declarative macros)
+
+### 1. Add node config
+
+```elixir
+# config/config.exs  (or runtime.exs for runtime topology)
+config :my_app, :remote_defrpc,
+  nodes: [:"remote@127.0.0.1"],
+  # or: nodes: {ClusterHelper, :get_nodes, [:remote_api]},
   select_mode: :round_robin,
   sticky_node: true
 ```
 
-Current version, `:round_robin` & `:sticky_node` are worked for process only.
+> `:round_robin` and `:sticky_node` are tracked **per process**.
 
-### Declare functions
+### 2. Declare functions
 
-```Elixir
-defmodule Remote
+```elixir
+defmodule MyApp.Remote do
   use EasyRpc.DefRpc,
-    otp_app: :simple_example,
+    otp_app: :my_app,
     config_name: :remote_defrpc,
-    # Remote module name
     module: RemoteNode.Interface,
-    timeout: 1000
+    timeout: 1_000
 
   defrpc :get_data
   defrpc :put_data, args: 1
   defrpc :clear, args: 2, as: :clear_data, private: true
-  defrpc :put_data, args: [:name], new_name: :put_with_retry, retry: 3, timeout: 1000
+  defrpc :put_data, args: [:name], as: :put_with_retry, retry: 3, timeout: 1_000
 end
 ```
 
-## Usage - Config way
+**`defrpc` options:**
 
-This is an example for declare by config in config.exs file.
-All function & node info (excepted `nodes: {module, function, arguments}`) are generated at compile time.
-For this way you need to work with config than module.
+| Option              | Description                                           |
+|---------------------|-------------------------------------------------------|
+| `:args`             | Arity as integer, `[]` (zero), or list of named atoms |
+| `:as` / `:new_name` | Override the generated function name                  |
+| `:private`          | Generate as `defp` (default: `false`)                 |
+| `:retry`            | Override global retry count                           |
+| `:timeout`          | Override global timeout (ms or `:infinity`)           |
+| `:error_handling`   | Override global error-handling flag                   |
 
-Follow steps
+---
 
-### Add config to config.exs
+## Usage — `RpcWrapper` (config-driven)
 
-Put config to config.exs file, and use it in your module by using RpcWrapper.
-User need separate config for each wrapper, and put it in config.exs
+All function and node information is declared in config.
+Functions are generated at compile time.
 
-```Elixir
-config :app_name, :wrapper_name,
-  nodes: [:"test1@test.local"], # or using function like nodes: {Module, Fun, Args}
+### 1. Add config
+
+```elixir
+# config/config.exs
+config :my_app, :data_wrapper,
+  nodes: [:"node1@host", :"node2@host"],
+  # or: nodes: {ClusterHelper, :get_nodes, [:data]},
   error_handling: true,
   select_mode: :random,
   module: TargetApp.Interface.Api,
   functions: [
+    # {function_name, arity}
     # {function_name, arity, options}
     {:get_data, 1},
-    {:put_data, 1, error_handling: false},
-    {:clear, 2, new_name: :clear_data, retry: 3},
-    {:clear_all, 0, new_name: :clear_all, private: true}, # wrap to private function.
+    {:put_data, 1, [error_handling: false]},
+    {:clear, 2, [new_name: :clear_data, retry: 3]},
+    {:clear_all, 0, [new_name: :reset, private: true]}
   ]
 ```
 
-### Wrap to local module
+### 2. Use in your module
 
-by using `use EasyRpc.RpcWrapper` in your module, you can call remote functions as local functions.
-
-```Elixir
-defmodule DataHelper do
+```elixir
+defmodule MyApp.DataHelper do
   use EasyRpc.RpcWrapper,
-    otp_app: :app_name,
-    config_name: :account_wrapper
+    otp_app: :my_app,
+    config_name: :data_wrapper
 
   def process_remote() do
-    # call rpc like a local function.
     case get_data("key") do
-      {:ok, data} ->
-        # do something with data
-
-      {:error, reason} ->
-        # handle error
+      {:ok, data}     -> data
+      {:error, reason} -> {:error, reason}
     end
   end
 end
 
-# Or call from other module like
-{:ok, result} = DataHelper.get_data("my_key")
+# Or call directly:
+{:ok, result} = MyApp.DataHelper.get_data("my_key")
 ```
 
-For more details please go to module's docs.
+---
 
-## Example
+## Node Selection Strategies
 
-You can go to example folder to see how EasyRpc work, check config & run and see.
+Configure via `select_mode:` in your config:
 
-Go to [lib_examples on Github](https://github.com/ohhi-vn/lib_examples/tree/main/easy_rpc) and follow the README in sub folders.
+| Strategy       | Description                                                     |
+|----------------|-----------------------------------------------------------------|
+| `:random`      | Randomly picks a node on each call (default)                    |
+| `:round_robin` | Circular distribution, tracked per process                      |
+| `:hash`        | Consistent hashing on args — same args always hit the same node |
 
+### Sticky Nodes
 
-## Support AI agents & MCP
+```elixir
+config :my_app, :api,
+  nodes: [:node1@host, :node2@host],
+  select_mode: :random,
+  sticky_node: true   # process pins to first selected node
+```
 
-Run this command for update guide & rules from deps to repo for supporting ai agents.
+### Dynamic Node Discovery
+
+```elixir
+config :my_app, :api,
+  nodes: {ClusterHelper, :get_nodes, [:backend]},
+  select_mode: :round_robin
+```
+
+---
+
+## Error Handling
+
+### Without error handling (default — raises on error)
+
+```elixir
+user = MyApi.get_user(123)
+```
+
+### With error handling (returns tagged tuples)
+
+```elixir
+case MyApi.get_user(123) do
+  {:ok, user}                    -> process(user)
+  {:error, %EasyRpc.Error{} = e} -> Logger.error(EasyRpc.Error.format(e))
+end
+```
+
+Enable globally in config or per function:
+
+```elixir
+config :my_app, :api, error_handling: true
+
+# or per defrpc:
+defrpc :get_user, args: 1, error_handling: true
+```
+
+---
+
+## Retry Logic
+
+```elixir
+# Global retry
+config :my_app, :api, retry: 3
+
+# Per-function
+defrpc :critical_op, args: 1, retry: 5
+```
+
+> When `retry > 0`, `error_handling` is automatically enabled — retried calls
+> always return `{:ok, result} | {:error, %EasyRpc.Error{}}`.
+
+---
+
+## Timeout Configuration
+
+```elixir
+# Global
+config :my_app, :api, timeout: 5_000
+
+# Per-function
+defrpc :long_op,    args: 1, timeout: 30_000
+defrpc :health_check,        timeout: 500
+defrpc :no_limit,            timeout: :infinity
+```
+
+---
+
+## Examples
+
+See the [lib_examples repository](https://github.com/ohhi-vn/lib_examples/tree/main/easy_rpc) for complete, runnable examples.
+
+---
+
+## AI Agents & MCP Support
+
+Sync usage rules from deps into your repo for AI agent support:
 
 ```bash
 mix usage_rules.sync AGENTS.md --all \
@@ -131,10 +230,11 @@ mix usage_rules.sync AGENTS.md --all \
   --inline usage_rules:all
 ```
 
-Run this command for enable MCP server
+Start the MCP server:
 
 ```bash
 mix tidewave
 ```
 
-Config MCP for agent `http://localhost:4113/tidewave/mcp`, changes port in `mix.exs` file if needed. Go to [Tidewave](https://hexdocs.pm/tidewave/) for more informations.
+Configure your agent to connect to `http://localhost:4113/tidewave/mcp` (change port in `mix.exs` if needed).
+See [Tidewave docs](https://hexdocs.pm/tidewave/) for details.

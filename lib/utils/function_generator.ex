@@ -1,36 +1,29 @@
 defmodule EasyRpc.Utils.FunctionGenerator do
   @moduledoc """
-  Utilities for generating RPC wrapper functions.
+  Compile-time helpers for generating RPC wrapper functions.
 
-  This module provides helper functions used by both `EasyRpc.RpcWrapper`
-  and `EasyRpc.DefRpc` to generate wrapper functions with consistent behavior.
+  Used by both `EasyRpc.RpcWrapper` and `EasyRpc.DefRpc` to ensure
+  consistent behaviour when expanding macros.
 
-  It handles:
-  - Function option parsing and validation
-  - Merging global and per-function configurations
-  - Function name resolution
-  - Arity handling
+  Responsibilities:
 
-  ## Function Options
-
-  Supported options for individual functions:
-  - `:as` / `:new_name` - Alternative name for the generated function
-  - `:retry` - Number of retry attempts (overrides global setting)
-  - `:timeout` - Timeout in milliseconds (overrides global setting)
-  - `:error_handling` - Enable/disable error handling (overrides global setting)
-  - `:private` - Generate as private function (default: false)
+  - Normalising function info tuples into `{name, arity, opts}`
+  - Resolving final function names (`:as` / `:new_name` support)
+  - Merging per-function opts over global `WrapperConfig`
+  - Generating AST variable lists for macro `def` bodies
+  - Validating per-function option values
   """
 
   alias EasyRpc.WrapperConfig
 
   @type function_opts :: keyword()
-  @type function_info :: {name :: atom(), arity :: non_neg_integer(), opts :: keyword()}
+  @type function_info ::
+          {name :: atom(), arity :: non_neg_integer() | [atom()], opts :: keyword()}
 
   @doc """
-  Normalizes function info into a consistent format.
+  Normalises a function spec tuple into `{name, arity_or_args, opts}`.
 
-  Converts various function specification formats into a standardized
-  tuple of `{function_name, arity, options}`.
+  Raises `EasyRpc.Error` on unrecognised formats.
 
   ## Examples
 
@@ -39,33 +32,25 @@ defmodule EasyRpc.Utils.FunctionGenerator do
 
       iex> normalize_function_info({:get_user, 1, [retry: 3]})
       {:get_user, 1, [retry: 3]}
-
-  ## Raises
-
-  `EasyRpc.Error` if the function info format is invalid
   """
   @spec normalize_function_info(tuple()) :: function_info()
-  def normalize_function_info({fun, arity}) when is_atom(fun) and is_integer(arity) do
-    {fun, arity, []}
-  end
+  def normalize_function_info({fun, arity}) when is_atom(fun) and is_integer(arity),
+    do: {fun, arity, []}
 
   def normalize_function_info({fun, arity, opts})
-      when is_atom(fun) and is_integer(arity) and is_list(opts) do
-    {fun, arity, opts}
-  end
+      when is_atom(fun) and is_integer(arity) and is_list(opts),
+      do: {fun, arity, opts}
 
-  def normalize_function_info(invalid) do
-    raise EasyRpc.Error.config_error(
-            "Invalid function info format: #{inspect(invalid)}. " <>
-              "Expected {atom, integer} or {atom, integer, keyword}"
-          )
-  end
+  def normalize_function_info(invalid),
+    do:
+      raise(
+        EasyRpc.Error.config_error(
+          "Invalid function spec: #{inspect(invalid)} — expected {atom, integer} or {atom, integer, keyword}"
+        )
+      )
 
   @doc """
-  Resolves the final function name from options.
-
-  Checks for `:as` or `:new_name` options and returns the appropriate name.
-  Falls back to the original function name if no override is specified.
+  Resolves the effective function name, honouring `:as` and `:new_name` opts.
 
   ## Examples
 
@@ -74,97 +59,46 @@ defmodule EasyRpc.Utils.FunctionGenerator do
 
       iex> resolve_function_name(:get_user, [as: :fetch_user])
       :fetch_user
-
-      iex> resolve_function_name(:get_user, [new_name: :fetch_user])
-      :fetch_user
   """
   @spec resolve_function_name(atom(), function_opts()) :: atom()
-  def resolve_function_name(original_name, opts) do
-    Keyword.get(opts, :as) || Keyword.get(opts, :new_name, original_name)
-  end
+  def resolve_function_name(original, opts),
+    do: Keyword.get(opts, :as) || Keyword.get(opts, :new_name, original)
 
   @doc """
-  Determines if the function should be generated as private.
-
-  ## Examples
-
-      iex> is_private?([private: true])
-      true
-
-      iex> is_private?([])
-      false
+  Returns `true` if the function should be generated as private.
   """
   @spec is_private?(function_opts()) :: boolean()
-  def is_private?(opts) do
-    Keyword.get(opts, :private, false)
-  end
+  def is_private?(opts), do: Keyword.get(opts, :private, false)
 
   @doc """
-  Merges global config with function-specific options.
+  Merges per-function opts over `global_config`, returning a new `WrapperConfig`.
 
-  Creates a new WrapperConfig with function-specific values overriding
-  global defaults. Automatically enables error_handling if retry > 0.
-
-  ## Parameters
-
-  - `global_config` - The global WrapperConfig
-  - `fun_opts` - Function-specific options
-
-  ## Returns
-
-  A new WrapperConfig with merged settings
+  Automatically sets `error_handling: true` when `retry > 0`.
 
   ## Examples
 
-      global_config = %WrapperConfig{retry: 0, timeout: 5000, error_handling: false}
-
-      merge_config(global_config, [retry: 3, timeout: 1000])
-      #=> %WrapperConfig{retry: 3, timeout: 1000, error_handling: true}
-
-      merge_config(global_config, [error_handling: false])
-      #=> %WrapperConfig{retry: 0, timeout: 5000, error_handling: false}
+      merge_config(%WrapperConfig{retry: 0, timeout: 5000, error_handling: false}, [retry: 3])
+      #=> %WrapperConfig{retry: 3, timeout: 5000, error_handling: true}
   """
   @spec merge_config(WrapperConfig.t(), function_opts()) :: WrapperConfig.t()
-  def merge_config(%WrapperConfig{} = global_config, fun_opts) do
-    fun_retry = Keyword.get(fun_opts, :retry, global_config.retry)
-    fun_timeout = Keyword.get(fun_opts, :timeout, global_config.timeout)
+  def merge_config(%WrapperConfig{} = global, fun_opts) do
+    retry = Keyword.get(fun_opts, :retry, global.retry)
+    timeout = Keyword.get(fun_opts, :timeout, global.timeout)
 
-    # Always use error_handling if retry > 0
-    fun_error_handling =
-      if fun_retry > 0 do
-        true
-      else
-        Keyword.get(fun_opts, :error_handling, global_config.error_handling)
-      end
+    error_handling =
+      if retry > 0,
+        do: true,
+        else: Keyword.get(fun_opts, :error_handling, global.error_handling)
 
-    %{global_config | retry: fun_retry, timeout: fun_timeout, error_handling: fun_error_handling}
+    %{global | retry: retry, timeout: timeout, error_handling: error_handling}
   end
 
   @doc """
-  Validates function options.
+  Validates all keys and values in a per-function opts list.
+  Raises `EasyRpc.Error` on any unknown key or bad value.
 
-  Ensures that all option keys are valid and values are of the correct type.
-
-  ## Valid Options
-
-  - `:as` / `:new_name` - atom
-  - `:retry` - non-negative integer
-  - `:timeout` - positive integer or :infinity
-  - `:error_handling` - boolean
-  - `:private` - boolean
-  - `:args` - non-negative integer or list of atoms
-
-  ## Examples
-
-      iex> validate_function_opts!([retry: 3, timeout: 1000])
-      :ok
-
-      iex> validate_function_opts!([invalid_option: true])
-      ** (EasyRpc.Error) Invalid function option: :invalid_option
-
-  ## Raises
-
-  `EasyRpc.Error` if validation fails
+  Valid keys: `:as`, `:new_name`, `:retry`, `:timeout`, `:error_handling`,
+  `:private`, `:args`.
   """
   @spec validate_function_opts!(function_opts()) :: :ok
   def validate_function_opts!(opts) when is_list(opts) do
@@ -173,8 +107,7 @@ defmodule EasyRpc.Utils.FunctionGenerator do
     Enum.each(opts, fn {key, value} ->
       unless key in valid_keys do
         raise EasyRpc.Error.config_error(
-                "Invalid function option: #{inspect(key)}. " <>
-                  "Valid options: #{inspect(valid_keys)}"
+                "Unknown function option #{inspect(key)} — valid: #{inspect(valid_keys)}"
               )
       end
 
@@ -185,27 +118,13 @@ defmodule EasyRpc.Utils.FunctionGenerator do
   end
 
   @doc """
-  Parses the arity specification.
+  Parses an arity specification into a canonical form.
 
-  Handles different arity formats:
-  - Integer: number of arguments
-  - Empty list: no arguments (arity 0)
-  - List of atoms: named arguments
+  - Integer  → used directly
+  - `[]`     → `0`
+  - `[atom]` → list of named arg atoms
 
-  ## Examples
-
-      iex> parse_arity(2)
-      2
-
-      iex> parse_arity([])
-      0
-
-      iex> parse_arity([:user_id, :name])
-      [:user_id, :name]
-
-  ## Raises
-
-  `EasyRpc.Error` if arity format is invalid
+  Raises `EasyRpc.Error` on invalid input.
   """
   @spec parse_arity(integer() | list()) :: non_neg_integer() | [atom()]
   def parse_arity(0), do: 0
@@ -215,74 +134,58 @@ defmodule EasyRpc.Utils.FunctionGenerator do
   def parse_arity(list) when is_list(list) do
     unless Enum.all?(list, &is_atom/1) do
       raise EasyRpc.Error.config_error(
-              "Invalid args list: all elements must be atoms, got: #{inspect(list)}"
+              "Invalid args list — all elements must be atoms, got: #{inspect(list)}"
             )
     end
 
     list
   end
 
-  def parse_arity(invalid) do
-    raise EasyRpc.Error.config_error(
-            "Invalid arity specification: #{inspect(invalid)}. " <>
-              "Expected non-negative integer or list of atoms"
-          )
-  end
+  def parse_arity(invalid),
+    do:
+      raise(
+        EasyRpc.Error.config_error(
+          "Invalid arity — expected non-negative integer or list of atoms, got: #{inspect(invalid)}"
+        )
+      )
 
   @doc """
-  Generates variable names for function arguments.
-
-  Creates a list of variable AST nodes for macro generation.
+  Generates AST variable nodes for use in macro-expanded `def` bodies.
 
   ## Examples
 
-      iex> generate_arg_vars(3)
-      [Macro.var(:arg_1, nil), Macro.var(:arg_2, nil), Macro.var(:arg_3, nil)]
+      generate_arg_vars(2)
+      #=> [Macro.var(:arg_1, nil), Macro.var(:arg_2, nil)]
 
-      iex> generate_arg_vars([:user_id, :name])
-      [Macro.var(:user_id, nil), Macro.var(:name, nil)]
+      generate_arg_vars([:user_id, :name])
+      #=> [Macro.var(:user_id, nil), Macro.var(:name, nil)]
   """
   @spec generate_arg_vars(non_neg_integer() | [atom()]) :: [Macro.t()]
   def generate_arg_vars(0), do: []
 
-  def generate_arg_vars(n) when is_integer(n) and n > 0 do
-    Enum.map(1..n, &Macro.var(:"arg_#{&1}", nil))
-  end
+  def generate_arg_vars(n) when is_integer(n) and n > 0,
+    do: Enum.map(1..n, &Macro.var(:"arg_#{&1}", nil))
 
-  def generate_arg_vars(arg_names) when is_list(arg_names) do
-    Enum.map(arg_names, &Macro.var(&1, nil))
-  end
+  def generate_arg_vars(names) when is_list(names),
+    do: Enum.map(names, &Macro.var(&1, nil))
 
-  ## Private Functions
+  ## Private
 
-  defp validate_function_opt_value!(:as, value) when is_atom(value), do: :ok
-  defp validate_function_opt_value!(:new_name, value) when is_atom(value), do: :ok
-  defp validate_function_opt_value!(:private, value) when is_boolean(value), do: :ok
-  defp validate_function_opt_value!(:error_handling, value) when is_boolean(value), do: :ok
-
-  defp validate_function_opt_value!(:retry, value)
-       when is_integer(value) and value >= 0,
-       do: :ok
-
+  defp validate_function_opt_value!(:as, v) when is_atom(v), do: :ok
+  defp validate_function_opt_value!(:new_name, v) when is_atom(v), do: :ok
+  defp validate_function_opt_value!(:private, v) when is_boolean(v), do: :ok
+  defp validate_function_opt_value!(:error_handling, v) when is_boolean(v), do: :ok
+  defp validate_function_opt_value!(:retry, v) when is_integer(v) and v >= 0, do: :ok
   defp validate_function_opt_value!(:timeout, :infinity), do: :ok
+  defp validate_function_opt_value!(:timeout, v) when is_integer(v) and v > 0, do: :ok
 
-  defp validate_function_opt_value!(:timeout, value)
-       when is_integer(value) and value > 0,
-       do: :ok
-
-  defp validate_function_opt_value!(:args, value) do
-    try do
-      parse_arity(value)
-      :ok
-    rescue
-      _ ->
-        raise EasyRpc.Error.config_error("Invalid value for :args option: #{inspect(value)}")
-    end
+  defp validate_function_opt_value!(:args, v) do
+    parse_arity(v)
+    :ok
+  rescue
+    _ -> raise EasyRpc.Error.config_error("Invalid value for :args option: #{inspect(v)}")
   end
 
-  defp validate_function_opt_value!(key, value) do
-    raise EasyRpc.Error.config_error(
-            "Invalid value for option #{inspect(key)}: #{inspect(value)}"
-          )
-  end
+  defp validate_function_opt_value!(key, value),
+    do: raise(EasyRpc.Error.config_error("Invalid value for #{inspect(key)}: #{inspect(value)}"))
 end

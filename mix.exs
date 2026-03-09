@@ -4,7 +4,7 @@ defmodule EasyRpc.MixProject do
   def project do
     [
       app: :easy_rpc,
-      version: "0.6.0",
+      version: "0.7.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -16,7 +16,8 @@ defmodule EasyRpc.MixProject do
       docs: docs(),
       description: description(),
       package: package(),
-      aliases: aliases()
+      aliases: aliases(),
+      usage_rules: usage_rules()
     ]
   end
 
@@ -30,13 +31,13 @@ defmodule EasyRpc.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ex_doc, "~> 0.38", only: :dev, runtime: false},
-      {:benchee, "~> 1.4", only: :dev},
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
+      {:benchee, "~> 1.5", only: :dev},
 
-      # Support for AI agent
+      # Support for AI agent in dev env
       {:tidewave, "~> 0.5", only: :dev},
-      {:bandit, "~> 1.8", only: :dev},
-      {:usage_rules, "~> 0.1", only: [:dev]}
+      {:bandit, "~> 1.10", only: :dev},
+      {:usage_rules, "~> 1.2", only: [:dev]}
     ]
   end
 
@@ -101,6 +102,13 @@ defmodule EasyRpc.MixProject do
         """
         |> String.trim()
       ]
+    ]
+  end
+
+  def usage_rules do
+    [
+      file: "AGENTS.md",
+      usage_rules: :all
     ]
   end
 end

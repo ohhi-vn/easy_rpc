@@ -2,68 +2,39 @@ defmodule EasyRpc.NodeSelector do
   @moduledoc """
   Node selection strategies for distributed RPC calls.
 
-  This module provides different strategies for selecting target nodes
-  when making remote procedure calls. It supports both static node lists
-  and dynamic node discovery through MFA (Module, Function, Arguments).
+  Supports both static node lists and dynamic node discovery through
+  MFA (Module, Function, Arguments).
 
   ## Selection Strategies
 
-  ### `:random`
-  Randomly selects a node from the available list on each call.
-  Useful for simple load distribution without state.
-
-  ### `:round_robin`
-  Distributes calls across nodes in a circular pattern.
-  **Note**: State is maintained per process, so each process has its own round-robin counter.
-
-  ### `:hash`
-  Uses consistent hashing based on function arguments to select a node.
-  Same arguments will always route to the same node (unless the node list changes).
-  Useful for cache locality and session affinity.
+  - `:random`      - Randomly picks a node on each call.
+  - `:round_robin` - Circular distribution, tracked per-process.
+  - `:hash`        - Consistent hashing on function arguments.
+                     Same args always route to the same node.
 
   ## Sticky Nodes
 
-  When `sticky_node: true` is enabled, each process will "stick" to the first
-  node it selects for all subsequent calls. This is useful for maintaining
-  session state or connection pooling.
-
-  **Note**: Sticky nodes are maintained per process using the process dictionary.
+  When `sticky_node: true`, a process sticks to the first node it selects
+  for all subsequent calls (stored in the process dictionary).
 
   ## Node Configuration
 
-  Nodes can be configured in two ways:
-
-  1. **Static list**: `nodes: [:node1@host, :node2@host]`
-  2. **Dynamic MFA**: `nodes: {MyModule, :get_nodes, []}`
-
-  The dynamic MFA approach is useful when:
-  - Node topology changes at runtime
-  - Using service discovery
-  - Integrating with cluster management tools (e.g., ClusterHelper)
+  - **Static list**: `nodes: [:node1@host, :node2@host]`
+  - **Dynamic MFA**: `nodes: {MyModule, :get_nodes, []}`
 
   ## Examples
 
-      # Static node list with random selection
-      selector = NodeSelector.new(
-        [:node1@host, :node2@host],
-        :my_selector_id,
-        :random
-      )
+      selector = NodeSelector.new([:n1@host, :n2@host], :my_id, :random)
 
-      # Dynamic nodes with round-robin
       selector = NodeSelector.new(
         {ClusterHelper, :get_nodes, [:backend]},
         :backend_selector,
         :round_robin,
-        true  # sticky_node
+        true
       )
 
-      # Select a node
       node = NodeSelector.select_node(selector, ["user_123"])
-      #=> :node1@host
-
-      # Load from application config
-      selector = NodeSelector.load_config!(:my_app, :rpc_config)
+      #=> :n1@host
   """
 
   alias __MODULE__
@@ -84,43 +55,13 @@ defmodule EasyRpc.NodeSelector do
 
   @strategies [:random, :round_robin, :hash]
 
-  defstruct [
-    :id,
-    :nodes_or_mfa,
-    strategy: :random,
-    sticky_node: false
-  ]
+  defstruct [:id, :nodes_or_mfa, strategy: :random, sticky_node: false]
 
   ## Public API
 
   @doc """
-  Creates a new NodeSelector with the given configuration.
-
-  ## Parameters
-
-  - `nodes_or_mfa` - Either a list of nodes or an MFA tuple for dynamic nodes
-  - `id` - Unique identifier for this selector (used for process dictionary keys)
-  - `strategy` - Selection strategy (`:random`, `:round_robin`, or `:hash`)
-  - `sticky_node` - Whether to stick to the first selected node per process
-
-  ## Returns
-
-  A validated NodeSelector struct
-
-  ## Examples
-
-      NodeSelector.new([:node1@host, :node2@host], :my_id, :random)
-
-      NodeSelector.new(
-        {MyCluster, :nodes, []},
-        :dynamic_id,
-        :round_robin,
-        true
-      )
-
-  ## Raises
-
-  `EasyRpc.Error` if configuration is invalid
+  Creates and validates a new `NodeSelector`.
+  Raises `EasyRpc.Error` if any option is invalid.
   """
   @spec new(nodes_config(), selector_id(), strategy(), boolean()) :: t()
   def new(nodes_or_mfa, id, strategy \\ :random, sticky_node \\ false) do
@@ -134,31 +75,16 @@ defmodule EasyRpc.NodeSelector do
   end
 
   @doc """
-  Loads NodeSelector configuration from application config.
+  Loads a `NodeSelector` from application config.
 
-  ## Parameters
-
-  - `app_name` - The application name (e.g., `:my_app`)
-  - `config_name` - The configuration key (e.g., `:remote_nodes`)
-
-  ## Expected Config Format
+  Expected format:
 
       config :my_app, :remote_nodes,
         nodes: [:node1@host, :node2@host],
         select_mode: :round_robin,
         sticky_node: false
 
-  ## Returns
-
-  A validated NodeSelector struct
-
-  ## Examples
-
-      selector = NodeSelector.load_config!(:my_app, :backend_nodes)
-
-  ## Raises
-
-  `EasyRpc.Error` if configuration is missing or invalid
+  Raises `EasyRpc.Error` if config is missing or invalid.
   """
   @spec load_config!(app :: atom(), config_name :: atom()) :: t()
   def load_config!(app_name, config_name) do
@@ -167,7 +93,7 @@ defmodule EasyRpc.NodeSelector do
     unless config do
       Error.raise!(
         :config_error,
-        "Configuration not found for #{inspect(app_name)}.#{inspect(config_name)}"
+        "NodeSelector config not found: #{inspect(app_name)}.#{inspect(config_name)}"
       )
     end
 
@@ -179,57 +105,25 @@ defmodule EasyRpc.NodeSelector do
     |> validate!()
   end
 
-  @doc """
-  Updates the selector ID.
-
-  This is useful when you need to create multiple selectors with the same
-  configuration but different process dictionary keys.
-
-  ## Examples
-
-      selector = NodeSelector.new(nodes, :id1, :random)
-      selector2 = NodeSelector.update_id(selector, :id2)
-  """
+  @doc "Updates the selector's `:id` field."
   @spec update_id(t(), selector_id()) :: t()
-  def update_id(%NodeSelector{} = selector, id) do
-    %{selector | id: id}
-  end
+  def update_id(%NodeSelector{} = selector, id), do: %{selector | id: id}
 
   @doc """
-  Selects a node based on the configured strategy.
+  Selects a node using the configured strategy.
 
-  ## Parameters
+  - Respects sticky-node state stored in the process dictionary.
+  - `data` is only used by the `:hash` strategy.
 
-  - `selector` - The NodeSelector configuration
-  - `data` - Data to use for hash-based selection (typically function arguments)
-
-  ## Returns
-
-  The selected node
-
-  ## Examples
-
-      node = NodeSelector.select_node(selector, ["user_123"])
-      #=> :node1@host
-
-  ## Behavior
-
-  - If sticky_node is enabled and a node was previously selected, returns that node
-  - Otherwise selects a new node based on the strategy
-  - For `:hash` strategy, the `data` parameter determines which node is selected
-  - For `:round_robin`, maintains a counter per process
-  - For `:random`, randomly selects from available nodes
-
-  ## Raises
-
-  `EasyRpc.Error` if no nodes are available or MFA returns invalid data
+  Raises `EasyRpc.Error` when no nodes are available.
   """
   @spec select_node(t(), data :: term()) :: node()
   def select_node(%NodeSelector{} = selector, data) do
     case get_sticky_node(selector) do
       nil ->
-        nodes = fetch_nodes(selector)
-        node = select_by_strategy(nodes, selector.strategy, data, selector.id)
+        node =
+          selector |> fetch_nodes() |> select_by_strategy(selector.strategy, data, selector.id)
+
         maybe_store_sticky_node(selector, node)
         node
 
@@ -238,39 +132,24 @@ defmodule EasyRpc.NodeSelector do
     end
   end
 
-  @doc """
-  Clears the sticky node for the current process.
-
-  This is useful if you want to allow the process to select a new node.
-
-  ## Examples
-
-      NodeSelector.clear_sticky_node(selector)
-  """
+  @doc "Clears the sticky node for the current process."
   @spec clear_sticky_node(t()) :: :ok
-  def clear_sticky_node(%NodeSelector{sticky_node: true} = selector) do
-    Process.delete({:easy_rpc, :sticky_node, selector.id})
+  def clear_sticky_node(%NodeSelector{sticky_node: true, id: id}) do
+    Process.delete({:easy_rpc, :sticky_node, id})
     :ok
   end
 
   def clear_sticky_node(_selector), do: :ok
 
-  @doc """
-  Resets the round-robin counter for the current process.
-
-  ## Examples
-
-      NodeSelector.reset_round_robin(selector)
-  """
+  @doc "Resets the round-robin counter for the current process."
   @spec reset_round_robin(t()) :: :ok
-  def reset_round_robin(%NodeSelector{} = selector) do
-    Process.delete({:easy_rpc, :round_robin, selector.id})
+  def reset_round_robin(%NodeSelector{id: id}) do
+    Process.delete({:easy_rpc, :round_robin, id})
     :ok
   end
 
-  ## Private Functions
+  ## Private — Validation
 
-  # Validates the NodeSelector configuration
   defp validate!(%NodeSelector{} = selector) do
     validate_nodes_config!(selector.nodes_or_mfa)
     validate_strategy!(selector.strategy)
@@ -278,120 +157,103 @@ defmodule EasyRpc.NodeSelector do
     selector
   end
 
-  defp validate_nodes_config!(nodes) when is_list(nodes) do
-    if Enum.empty?(nodes) do
-      Error.raise!(
-        :config_error,
-        "Node list cannot be empty"
-      )
-    end
-
+  defp validate_nodes_config!(nodes) when is_list(nodes) and length(nodes) > 0 do
     unless Enum.all?(nodes, &is_atom/1) do
-      Error.raise!(
-        :config_error,
-        "All nodes must be atoms, got: #{inspect(nodes)}"
-      )
+      Error.raise!(:config_error, "All nodes must be atoms, got: #{inspect(nodes)}")
     end
 
     :ok
+  end
+
+  defp validate_nodes_config!([]) do
+    Error.raise!(:config_error, "Node list cannot be empty")
   end
 
   defp validate_nodes_config!({mod, fun, args})
-       when is_atom(mod) and is_atom(fun) and is_list(args) do
-    :ok
-  end
+       when is_atom(mod) and is_atom(fun) and is_list(args), do: :ok
 
   defp validate_nodes_config!(invalid) do
     Error.raise!(
       :config_error,
-      "Invalid nodes configuration. Expected list of atoms or {module, function, args} tuple, got: #{inspect(invalid)}"
+      "Invalid nodes config — expected list of atoms or {module, fun, args}, got: #{inspect(invalid)}"
     )
   end
 
-  defp validate_strategy!(strategy) when strategy in @strategies, do: :ok
+  defp validate_strategy!(s) when s in @strategies, do: :ok
 
   defp validate_strategy!(invalid) do
     Error.raise!(
       :config_error,
-      "Invalid strategy. Expected one of #{inspect(@strategies)}, got: #{inspect(invalid)}"
+      "Invalid strategy — expected one of #{inspect(@strategies)}, got: #{inspect(invalid)}"
     )
   end
 
-  defp validate_sticky_node!(value) when is_boolean(value), do: :ok
+  defp validate_sticky_node!(v) when is_boolean(v), do: :ok
 
   defp validate_sticky_node!(invalid) do
-    Error.raise!(
-      :config_error,
-      "sticky_node must be a boolean, got: #{inspect(invalid)}"
-    )
+    Error.raise!(:config_error, "sticky_node must be a boolean, got: #{inspect(invalid)}")
   end
 
-  # Fetches the node list, either from static config or by calling MFA
-  defp fetch_nodes(%NodeSelector{nodes_or_mfa: nodes}) when is_list(nodes) do
-    nodes
-  end
+  ## Private — Node Fetching
 
-  defp fetch_nodes(%NodeSelector{nodes_or_mfa: {module, function, args}}) do
-    case apply(module, function, args) do
-      nodes when is_list(nodes) and length(nodes) > 0 ->
+  defp fetch_nodes(%NodeSelector{nodes_or_mfa: nodes}) when is_list(nodes), do: nodes
+
+  defp fetch_nodes(%NodeSelector{nodes_or_mfa: {mod, fun, args}}) do
+    case apply(mod, fun, args) do
+      [_ | _] = nodes ->
         nodes
 
       [] ->
         Error.raise!(
           :node_error,
-          "MFA #{inspect(module)}.#{inspect(function)} returned empty node list"
+          "Dynamic node provider #{inspect(mod)}.#{fun}/#{length(args)} returned an empty list"
         )
 
       invalid ->
         Error.raise!(
           :config_error,
-          "MFA #{inspect(module)}.#{inspect(function)} must return a list of nodes, got: #{inspect(invalid)}"
+          "Dynamic node provider #{inspect(mod)}.#{fun}/#{length(args)} must return a non-empty " <>
+            "list of atoms, got: #{inspect(invalid)}"
         )
     end
   end
 
-  # Selects a node based on the strategy
-  defp select_by_strategy(nodes, :random, _data, _id) do
-    Enum.random(nodes)
-  end
+  ## Private — Strategy Selection
+
+  defp select_by_strategy(nodes, :random, _data, _id),
+    do: Enum.random(nodes)
 
   defp select_by_strategy(nodes, :round_robin, _data, id) do
-    current_index = get_round_robin_index(id, length(nodes))
-    next_index = rem(current_index + 1, length(nodes))
-    store_round_robin_index(id, next_index)
-    Enum.at(nodes, current_index)
+    count = length(nodes)
+    idx = get_round_robin_index(id, count)
+    store_round_robin_index(id, rem(idx + 1, count))
+    Enum.at(nodes, idx)
   end
 
   defp select_by_strategy(nodes, :hash, data, _id) do
-    index = :erlang.phash2(data, length(nodes))
-    Enum.at(nodes, index)
+    Enum.at(nodes, :erlang.phash2(data, length(nodes)))
   end
 
-  # Gets the sticky node from process dictionary
-  defp get_sticky_node(%NodeSelector{sticky_node: true, id: id}) do
-    Process.get({:easy_rpc, :sticky_node, id})
-  end
+  ## Private — Process Dictionary Helpers
 
-  defp get_sticky_node(_selector), do: nil
+  defp get_sticky_node(%NodeSelector{sticky_node: true, id: id}),
+    do: Process.get({:easy_rpc, :sticky_node, id})
 
-  # Stores the sticky node in process dictionary
-  defp maybe_store_sticky_node(%NodeSelector{sticky_node: true, id: id}, node) do
-    Process.put({:easy_rpc, :sticky_node, id}, node)
-  end
+  defp get_sticky_node(_), do: nil
+
+  defp maybe_store_sticky_node(%NodeSelector{sticky_node: true, id: id}, node),
+    do: Process.put({:easy_rpc, :sticky_node, id}, node)
 
   defp maybe_store_sticky_node(_selector, _node), do: :ok
 
-  # Gets the current round-robin index, initializing randomly if not set
-  defp get_round_robin_index(id, node_count) do
+  defp get_round_robin_index(id, count) do
     case Process.get({:easy_rpc, :round_robin, id}) do
-      nil -> Enum.random(0..(node_count - 1))
-      index when index >= node_count -> 0
-      index -> index
+      nil -> Enum.random(0..(count - 1))
+      idx when idx >= count -> 0
+      idx -> idx
     end
   end
 
-  # Stores the round-robin index in process dictionary
-  defp store_round_robin_index(id, index) do
-    Process.put({:easy_rpc, :round_robin, id}, index)
-  end
+  defp store_round_robin_index(id, idx),
+    do: Process.put({:easy_rpc, :round_robin, id}, idx)
 end

@@ -2,71 +2,35 @@ defmodule EasyRpc.WrapperConfig do
   @moduledoc """
   Configuration struct for RPC wrappers.
 
-  This module defines the configuration structure used by both `EasyRpc.RpcWrapper`
-  and `EasyRpc.DefRpc` for executing remote procedure calls. It handles validation
-  of configuration parameters and provides utilities for loading configuration from
-  various sources.
+  Used by both `EasyRpc.RpcWrapper` and `EasyRpc.DefRpc` to describe how
+  remote calls are executed.
 
-  ## Configuration Fields
+  ## Fields
 
-  - `node_selector` - `NodeSelector` struct for selecting target nodes
-  - `module` - Remote module name to call (required)
-  - `timeout` - RPC timeout in milliseconds (default: 5000, or :infinity)
-  - `retry` - Number of retry attempts on failure (default: 0)
-  - `error_handling` - Whether to catch errors and return tuples (default: false)
-  - `functions` - List of function specifications for RpcWrapper (default: [])
+  - `node_selector`   - `NodeSelector` for picking target nodes
+  - `module`          - Remote module to call (required)
+  - `timeout`         - RPC timeout in ms, or `:infinity` (default: `5_000`)
+  - `retry`           - Retry attempts on failure (default: `0`)
+  - `error_handling`  - Return `{:ok, _} | {:error, _}` tuples (default: `false`)
+  - `functions`       - Function specs used by `RpcWrapper` (default: `[]`)
 
-  ## Function Specifications
+  ## Function Specs
 
-  Functions are specified as tuples in one of these formats:
+      {name, arity}
+      {name, arity, opts}
 
-  - `{function_name, arity}` - Basic function spec
-  - `{function_name, arity, opts}` - Function with options
-
-  Available options per function:
-  - `:new_name` - Alternative name for the local function
-  - `:retry` - Override global retry setting
-  - `:timeout` - Override global timeout setting
-  - `:error_handling` - Override global error handling
-  - `:private` - Define as private function (default: false)
+  Per-function opts: `:new_name`, `:as`, `:retry`, `:timeout`,
+  `:error_handling`, `:private`.
 
   ## Examples
 
-      # Create from keyword list
-      config = WrapperConfig.load_from_options!(
-        node_selector: node_selector,
+      WrapperConfig.load_from_options!(
+        node_selector: selector,
         module: RemoteModule,
         timeout: 5_000,
         retry: 3,
         error_handling: true
       )
-
-      # Create directly
-      config = WrapperConfig.new!(
-        node_selector,
-        RemoteModule,
-        5_000,
-        3,
-        true
-      )
-
-      # Load from application config
-      config = WrapperConfig.load_config!(:my_app, :rpc_config)
-
-  ## Configuration File Example
-
-      config :my_app, :rpc_config,
-        nodes: [:node1@host, :node2@host],
-        select_mode: :random,
-        module: Remote.Api,
-        timeout: 5_000,
-        retry: 3,
-        error_handling: true,
-        functions: [
-          {:get_user, 1},
-          {:create_user, 2, [retry: 5]},
-          {:delete_user, 1, [new_name: :remove_user, private: true]}
-        ]
   """
 
   alias EasyRpc.{Error, NodeSelector}
@@ -97,17 +61,9 @@ defmodule EasyRpc.WrapperConfig do
   ## Public API
 
   @doc """
-  Loads configuration from application config.
+  Loads config from the application environment.
 
-  Reads configuration from the application environment and creates a validated
-  WrapperConfig struct. The NodeSelector is also loaded from the same config.
-
-  ## Parameters
-
-  - `app_name` - Application name (e.g., `:my_app`)
-  - `config_name` - Configuration key (e.g., `:rpc_config`)
-
-  ## Expected Config Format
+  Expected format:
 
       config :my_app, :rpc_config,
         nodes: [:node1@host],
@@ -118,13 +74,7 @@ defmodule EasyRpc.WrapperConfig do
         error_handling: true,
         functions: [{:func_name, 1}]
 
-  ## Examples
-
-      config = WrapperConfig.load_config!(:my_app, :remote_api)
-
-  ## Raises
-
-  `EasyRpc.Error` if configuration is missing or invalid
+  Raises `EasyRpc.Error` if config is missing or invalid.
   """
   @spec load_config!(app :: atom(), config_name :: atom()) :: t()
   def load_config!(app_name, config_name) do
@@ -133,7 +83,7 @@ defmodule EasyRpc.WrapperConfig do
     unless config do
       Error.raise!(
         :config_error,
-        "Configuration not found for #{inspect(app_name)}.#{inspect(config_name)}"
+        "WrapperConfig not found: #{inspect(app_name)}.#{inspect(config_name)}"
       )
     end
 
@@ -149,33 +99,9 @@ defmodule EasyRpc.WrapperConfig do
   end
 
   @doc """
-  Loads configuration from a keyword list.
+  Loads config from a keyword list.
 
-  Creates a WrapperConfig from the provided options. Useful for programmatic
-  configuration without using application config.
-
-  ## Parameters
-
-  Keyword list with the following keys:
-  - `:node_selector` - NodeSelector struct (optional for DefRpc)
-  - `:module` - Remote module name (required)
-  - `:timeout` - Timeout in ms (default: 5000)
-  - `:retry` - Retry attempts (default: 0)
-  - `:error_handling` - Enable error handling (default: false)
-  - `:functions` - Function list (default: [])
-
-  ## Examples
-
-      config = WrapperConfig.load_from_options!(
-        node_selector: selector,
-        module: RemoteModule,
-        timeout: 3_000,
-        retry: 2
-      )
-
-  ## Raises
-
-  `EasyRpc.Error` if configuration is invalid
+  Raises `EasyRpc.Error` on missing `:module` or invalid values.
   """
   @spec load_from_options!(keyword()) :: t()
   def load_from_options!(options) when is_list(options) do
@@ -190,64 +116,24 @@ defmodule EasyRpc.WrapperConfig do
     |> validate!()
   rescue
     KeyError ->
-      Error.raise!(
-        :config_error,
-        "Missing required :module key in options"
-      )
+      Error.raise!(:config_error, "Missing required :module key in options")
   end
 
-  @doc """
-  Creates a new WrapperConfig with explicit parameters.
-
-  ## Parameters
-
-  - `node_selector` - NodeSelector struct
-  - `module` - Remote module name
-  - `timeout` - Timeout in milliseconds (default: 5000)
-  - `retry` - Number of retry attempts (default: 0)
-  - `error_handling` - Enable error handling (default: false)
-
-  ## Examples
-
-      config = WrapperConfig.new!(
-        node_selector,
-        RemoteModule
-      )
-
-      config = WrapperConfig.new!(
-        node_selector,
-        RemoteModule,
-        10_000,
-        3,
-        true
-      )
-
-  ## Raises
-
-  `EasyRpc.Error` if configuration is invalid
-  """
+  @doc "Creates a validated `WrapperConfig` with explicit parameters."
   @spec new!(NodeSelector.t(), module()) :: t()
-  def new!(node_selector, module) do
-    new!(node_selector, module, 5_000, 0, false)
-  end
+  def new!(node_selector, module),
+    do: new!(node_selector, module, 5_000, 0, false)
 
   @spec new!(NodeSelector.t(), module(), pos_integer() | :infinity) :: t()
-  def new!(node_selector, module, timeout) do
-    new!(node_selector, module, timeout, 0, false)
-  end
+  def new!(node_selector, module, timeout),
+    do: new!(node_selector, module, timeout, 0, false)
 
   @spec new!(NodeSelector.t(), module(), pos_integer() | :infinity, non_neg_integer()) :: t()
-  def new!(node_selector, module, timeout, retry) do
-    new!(node_selector, module, timeout, retry, false)
-  end
+  def new!(node_selector, module, timeout, retry),
+    do: new!(node_selector, module, timeout, retry, false)
 
-  @spec new!(
-          NodeSelector.t(),
-          module(),
-          pos_integer() | :infinity,
-          non_neg_integer(),
-          boolean()
-        ) :: t()
+  @spec new!(NodeSelector.t(), module(), pos_integer() | :infinity, non_neg_integer(), boolean()) ::
+          t()
   def new!(node_selector, module, timeout, retry, error_handling) do
     %WrapperConfig{
       node_selector: node_selector,
@@ -261,20 +147,8 @@ defmodule EasyRpc.WrapperConfig do
   end
 
   @doc """
-  Validates a WrapperConfig struct.
-
-  Checks that all configuration values are valid and within expected ranges.
-  This is automatically called by `new!/1-5`, `load_config!/2`, and
-  `load_from_options!/1`.
-
-  ## Examples
-
-      config = %WrapperConfig{module: MyModule}
-      validated = WrapperConfig.validate!(config)
-
-  ## Raises
-
-  `EasyRpc.Error` if any validation fails
+  Validates a `WrapperConfig` struct. Called automatically by all constructors.
+  Raises `EasyRpc.Error` on any invalid field.
   """
   @spec validate!(t()) :: t()
   def validate!(%WrapperConfig{} = config) do
@@ -287,98 +161,91 @@ defmodule EasyRpc.WrapperConfig do
     config
   end
 
-  ## Private Validation Functions
+  ## Private Validators
 
   defp validate_node_selector!(%NodeSelector{}), do: :ok
   defp validate_node_selector!(nil), do: :ok
 
-  defp validate_node_selector!(invalid) do
-    Error.raise!(
-      :config_error,
-      "Invalid node_selector. Expected %NodeSelector{} or nil, got: #{inspect(invalid)}"
-    )
-  end
+  defp validate_node_selector!(invalid),
+    do:
+      Error.raise!(
+        :config_error,
+        "Invalid node_selector — expected %NodeSelector{} or nil, got: #{inspect(invalid)}"
+      )
 
-  defp validate_module!(module) when is_atom(module) and not is_nil(module), do: :ok
+  defp validate_module!(m) when is_atom(m) and not is_nil(m), do: :ok
 
-  defp validate_module!(invalid) do
-    Error.raise!(
-      :config_error,
-      "Invalid module. Expected non-nil atom, got: #{inspect(invalid)}"
-    )
-  end
+  defp validate_module!(invalid),
+    do:
+      Error.raise!(
+        :config_error,
+        "Invalid module — expected a non-nil atom, got: #{inspect(invalid)}"
+      )
 
   defp validate_timeout!(:infinity), do: :ok
-  defp validate_timeout!(timeout) when is_integer(timeout) and timeout > 0, do: :ok
+  defp validate_timeout!(t) when is_integer(t) and t > 0, do: :ok
 
-  defp validate_timeout!(invalid) do
-    Error.raise!(
-      :config_error,
-      "Invalid timeout. Expected positive integer or :infinity, got: #{inspect(invalid)}"
-    )
-  end
+  defp validate_timeout!(invalid),
+    do:
+      Error.raise!(
+        :config_error,
+        "Invalid timeout — expected positive integer or :infinity, got: #{inspect(invalid)}"
+      )
 
-  defp validate_retry!(retry) when is_integer(retry) and retry >= 0, do: :ok
+  defp validate_retry!(r) when is_integer(r) and r >= 0, do: :ok
 
-  defp validate_retry!(invalid) do
-    Error.raise!(
-      :config_error,
-      "Invalid retry count. Expected non-negative integer, got: #{inspect(invalid)}"
-    )
-  end
+  defp validate_retry!(invalid),
+    do:
+      Error.raise!(
+        :config_error,
+        "Invalid retry — expected non-negative integer, got: #{inspect(invalid)}"
+      )
 
-  defp validate_error_handling!(value) when is_boolean(value), do: :ok
+  defp validate_error_handling!(v) when is_boolean(v), do: :ok
 
-  defp validate_error_handling!(invalid) do
-    Error.raise!(
-      :config_error,
-      "Invalid error_handling. Expected boolean, got: #{inspect(invalid)}"
-    )
-  end
+  defp validate_error_handling!(invalid),
+    do:
+      Error.raise!(
+        :config_error,
+        "Invalid error_handling — expected boolean, got: #{inspect(invalid)}"
+      )
 
-  defp validate_functions!(functions) when is_list(functions) do
-    Enum.each(functions, &validate_function_spec!/1)
-  end
+  defp validate_functions!(fns) when is_list(fns),
+    do: Enum.each(fns, &validate_function_spec!/1)
 
-  defp validate_functions!(invalid) do
-    Error.raise!(
-      :config_error,
-      "Invalid functions. Expected list, got: #{inspect(invalid)}"
-    )
-  end
+  defp validate_functions!(invalid),
+    do: Error.raise!(:config_error, "Invalid functions — expected list, got: #{inspect(invalid)}")
 
   defp validate_function_spec!({fun, arity})
-       when is_atom(fun) and is_integer(arity) and arity >= 0 do
-    :ok
-  end
+       when is_atom(fun) and is_integer(arity) and arity >= 0, do: :ok
 
   defp validate_function_spec!({fun, arity, opts})
        when is_atom(fun) and is_integer(arity) and arity >= 0 do
     unless Keyword.keyword?(opts) do
       Error.raise!(
         :config_error,
-        "Invalid function options for #{inspect(fun)}/#{arity}. Expected keyword list, got: #{inspect(opts)}"
+        "Invalid options for #{inspect(fun)}/#{arity} — expected keyword list, got: #{inspect(opts)}"
       )
     end
 
     validate_function_opts!(opts, fun, arity)
   end
 
-  defp validate_function_spec!(invalid) do
-    Error.raise!(
-      :config_error,
-      "Invalid function spec. Expected {atom, non_neg_integer} or {atom, non_neg_integer, keyword}, got: #{inspect(invalid)}"
-    )
-  end
+  defp validate_function_spec!(invalid),
+    do:
+      Error.raise!(
+        :config_error,
+        "Invalid function spec — expected {atom, arity} or {atom, arity, keyword}, got: #{inspect(invalid)}"
+      )
+
+  @valid_fun_keys [:new_name, :as, :retry, :timeout, :error_handling, :private]
 
   defp validate_function_opts!(opts, fun, arity) do
-    valid_keys = [:new_name, :retry, :timeout, :error_handling, :private, :as]
-
     Enum.each(opts, fn {key, value} ->
-      unless key in valid_keys do
+      unless key in @valid_fun_keys do
         Error.raise!(
           :config_error,
-          "Invalid option #{inspect(key)} for function #{inspect(fun)}/#{arity}. Valid options: #{inspect(valid_keys)}"
+          "Unknown option #{inspect(key)} for #{inspect(fun)}/#{arity} — valid: #{inspect(@valid_fun_keys)}"
         )
       end
 
@@ -386,28 +253,18 @@ defmodule EasyRpc.WrapperConfig do
     end)
   end
 
-  defp validate_function_opt!(:new_name, value, _fun, _arity) when is_atom(value), do: :ok
-  defp validate_function_opt!(:as, value, _fun, _arity) when is_atom(value), do: :ok
+  defp validate_function_opt!(:new_name, v, _, _) when is_atom(v), do: :ok
+  defp validate_function_opt!(:as, v, _, _) when is_atom(v), do: :ok
+  defp validate_function_opt!(:retry, v, _, _) when is_integer(v) and v >= 0, do: :ok
+  defp validate_function_opt!(:timeout, :infinity, _, _), do: :ok
+  defp validate_function_opt!(:timeout, v, _, _) when is_integer(v) and v > 0, do: :ok
+  defp validate_function_opt!(:error_handling, v, _, _) when is_boolean(v), do: :ok
+  defp validate_function_opt!(:private, v, _, _) when is_boolean(v), do: :ok
 
-  defp validate_function_opt!(:retry, value, _fun, _arity)
-       when is_integer(value) and value >= 0,
-       do: :ok
-
-  defp validate_function_opt!(:timeout, :infinity, _fun, _arity), do: :ok
-
-  defp validate_function_opt!(:timeout, value, _fun, _arity)
-       when is_integer(value) and value > 0,
-       do: :ok
-
-  defp validate_function_opt!(:error_handling, value, _fun, _arity) when is_boolean(value),
-    do: :ok
-
-  defp validate_function_opt!(:private, value, _fun, _arity) when is_boolean(value), do: :ok
-
-  defp validate_function_opt!(key, value, fun, arity) do
-    Error.raise!(
-      :config_error,
-      "Invalid value for #{inspect(key)} in function #{inspect(fun)}/#{arity}: #{inspect(value)}"
-    )
-  end
+  defp validate_function_opt!(key, value, fun, arity),
+    do:
+      Error.raise!(
+        :config_error,
+        "Invalid value for #{inspect(key)} in #{inspect(fun)}/#{arity}: #{inspect(value)}"
+      )
 end

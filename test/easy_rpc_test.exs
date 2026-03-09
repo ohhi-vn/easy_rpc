@@ -1,4 +1,7 @@
 defmodule EasyRpcTest do
   use ExUnit.Case
-  doctest EasyRpc
+
+  test "version/0 returns a binary string" do
+    assert is_binary(EasyRpc.version())
+  end
 end
