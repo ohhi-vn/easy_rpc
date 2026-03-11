@@ -64,20 +64,21 @@ defmodule MyApp.Remote do
   defrpc :get_data
   defrpc :put_data, args: 1
   defrpc :clear, args: 2, as: :clear_data, private: true
-  defrpc :put_data, args: [:name], as: :put_with_retry, retry: 3, timeout: 1_000
+  defrpc :put_data, args: [:name], as: :put_with_retry, retry: 3, sleep_before_retry: 200, timeout: 1_000
 end
 ```
 
 **`defrpc` options:**
 
-| Option              | Description                                           |
-|---------------------|-------------------------------------------------------|
-| `:args`             | Arity as integer, `[]` (zero), or list of named atoms |
-| `:as` / `:new_name` | Override the generated function name                  |
-| `:private`          | Generate as `defp` (default: `false`)                 |
-| `:retry`            | Override global retry count                           |
-| `:timeout`          | Override global timeout (ms or `:infinity`)           |
-| `:error_handling`   | Override global error-handling flag                   |
+| Option                | Description                                           |
+|-----------------------|-------------------------------------------------------|
+| `:args`               | Arity as integer, `[]` (zero), or list of named atoms |
+| `:as` / `:new_name`   | Override the generated function name                  |
+| `:private`            | Generate as `defp` (default: `false`)                 |
+| `:retry`              | Override global retry count                           |
+| `:sleep_before_retry` | Milliseconds to wait before each retry (default: `0`) |
+| `:timeout`            | Override global timeout (ms or `:infinity`)           |
+| `:error_handling`     | Override global error-handling flag                   |
 
 ---
 
@@ -96,12 +97,15 @@ config :my_app, :data_wrapper,
   error_handling: true,
   select_mode: :random,
   module: TargetApp.Interface.Api,
+  timeout: 5_000,
+  retry: 3,
+  sleep_before_retry: 500,       # wait 500 ms between retries
   functions: [
     # {function_name, arity}
     # {function_name, arity, options}
     {:get_data, 1},
     {:put_data, 1, [error_handling: false]},
-    {:clear, 2, [new_name: :clear_data, retry: 3]},
+    {:clear, 2, [new_name: :clear_data, retry: 3, sleep_before_retry: 100]},
     {:clear_all, 0, [new_name: :reset, private: true]}
   ]
 ```
@@ -200,6 +204,38 @@ defrpc :critical_op, args: 1, retry: 5
 
 ---
 
+## Sleep Before Retry
+
+By default EasyRpc retries immediately after a failure. Use `sleep_before_retry`
+to add a fixed delay (in milliseconds) between attempts. This is useful for
+giving a remote node time to recover, or for reducing thundering-herd pressure
+on a flapping service.
+
+```elixir
+# Global — all retries in this config wait 500 ms
+config :my_app, :api,
+  retry: 3,
+  sleep_before_retry: 500
+
+# Per-function override
+defrpc :critical_op, args: 1, retry: 5, sleep_before_retry: 200
+```
+
+The sleep happens **between** attempts — there is no delay before the first
+call, and no delay after the final failure.
+
+```
+attempt 1 → fails → sleep 500 ms
+attempt 2 → fails → sleep 500 ms
+attempt 3 → fails → sleep 500 ms
+attempt 4 → fails → return {:error, ...}
+```
+
+> `sleep_before_retry` requires a non-negative integer. The default is `0`
+> (no sleep). Setting it without also setting `retry` has no effect.
+
+---
+
 ## Timeout Configuration
 
 ```elixir
@@ -207,9 +243,9 @@ defrpc :critical_op, args: 1, retry: 5
 config :my_app, :api, timeout: 5_000
 
 # Per-function
-defrpc :long_op,    args: 1, timeout: 30_000
-defrpc :health_check,        timeout: 500
-defrpc :no_limit,            timeout: :infinity
+defrpc :long_op,      args: 1, timeout: 30_000
+defrpc :health_check,          timeout: 500
+defrpc :no_limit,              timeout: :infinity
 ```
 
 ---

@@ -4,7 +4,7 @@ defmodule EasyRpc.MixProject do
   def project do
     [
       app: :easy_rpc,
-      version: "0.7.0",
+      version: "0.8.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -42,7 +42,7 @@ defmodule EasyRpc.MixProject do
   end
 
   defp description() do
-    "A library for wrapping rpc call from a remote nodes to call like local function. Easy to wrap a remote functions to a local functions."
+    "A library for wrapping RPC calls from remote nodes, allowing them to be used like local functions. It provides a simple way to expose remote functions as local APIs."
   end
 
   defp package() do

@@ -2,35 +2,15 @@ defmodule EasyRpc.WrapperConfig do
   @moduledoc """
   Configuration struct for RPC wrappers.
 
-  Used by both `EasyRpc.RpcWrapper` and `EasyRpc.DefRpc` to describe how
-  remote calls are executed.
-
   ## Fields
 
-  - `node_selector`   - `NodeSelector` for picking target nodes
-  - `module`          - Remote module to call (required)
-  - `timeout`         - RPC timeout in ms, or `:infinity` (default: `5_000`)
-  - `retry`           - Retry attempts on failure (default: `0`)
-  - `error_handling`  - Return `{:ok, _} | {:error, _}` tuples (default: `false`)
-  - `functions`       - Function specs used by `RpcWrapper` (default: `[]`)
-
-  ## Function Specs
-
-      {name, arity}
-      {name, arity, opts}
-
-  Per-function opts: `:new_name`, `:as`, `:retry`, `:timeout`,
-  `:error_handling`, `:private`.
-
-  ## Examples
-
-      WrapperConfig.load_from_options!(
-        node_selector: selector,
-        module: RemoteModule,
-        timeout: 5_000,
-        retry: 3,
-        error_handling: true
-      )
+  - `node_selector`      - `NodeSelector` for picking target nodes
+  - `module`             - Remote module to call (required)
+  - `timeout`            - RPC timeout in ms, or `:infinity` (default: `5_000`)
+  - `retry`              - Retry attempts on failure (default: `0`)
+  - `sleep_before_retry` - Milliseconds to sleep before each retry (default: `0`)
+  - `error_handling`     - Return `{:ok, _} | {:error, _}` tuples (default: `false`)
+  - `functions`          - Function specs used by `RpcWrapper` (default: `[]`)
   """
 
   alias EasyRpc.{Error, NodeSelector}
@@ -45,6 +25,7 @@ defmodule EasyRpc.WrapperConfig do
           module: module(),
           timeout: pos_integer() | :infinity,
           retry: non_neg_integer(),
+          sleep_before_retry: non_neg_integer(),
           error_handling: boolean(),
           functions: [function_spec()]
         }
@@ -54,6 +35,7 @@ defmodule EasyRpc.WrapperConfig do
     :module,
     timeout: 5_000,
     retry: 0,
+    sleep_before_retry: 0,
     error_handling: false,
     functions: []
   ]
@@ -71,10 +53,9 @@ defmodule EasyRpc.WrapperConfig do
         module: RemoteModule,
         timeout: 5_000,
         retry: 3,
+        sleep_before_retry: 200,
         error_handling: true,
         functions: [{:func_name, 1}]
-
-  Raises `EasyRpc.Error` if config is missing or invalid.
   """
   @spec load_config!(app :: atom(), config_name :: atom()) :: t()
   def load_config!(app_name, config_name) do
@@ -92,17 +73,14 @@ defmodule EasyRpc.WrapperConfig do
       module: Keyword.fetch!(config, :module),
       timeout: Keyword.get(config, :timeout, 5_000),
       retry: Keyword.get(config, :retry, 0),
+      sleep_before_retry: Keyword.get(config, :sleep_before_retry, 0),
       error_handling: Keyword.get(config, :error_handling, false),
       functions: Keyword.get(config, :functions, [])
     }
     |> validate!()
   end
 
-  @doc """
-  Loads config from a keyword list.
-
-  Raises `EasyRpc.Error` on missing `:module` or invalid values.
-  """
+  @doc "Loads config from a keyword list."
   @spec load_from_options!(keyword()) :: t()
   def load_from_options!(options) when is_list(options) do
     %WrapperConfig{
@@ -110,6 +88,7 @@ defmodule EasyRpc.WrapperConfig do
       module: Keyword.fetch!(options, :module),
       timeout: Keyword.get(options, :timeout, 5_000),
       retry: Keyword.get(options, :retry, 0),
+      sleep_before_retry: Keyword.get(options, :sleep_before_retry, 0),
       error_handling: Keyword.get(options, :error_handling, false),
       functions: Keyword.get(options, :functions, [])
     }
@@ -122,40 +101,55 @@ defmodule EasyRpc.WrapperConfig do
   @doc "Creates a validated `WrapperConfig` with explicit parameters."
   @spec new!(NodeSelector.t(), module()) :: t()
   def new!(node_selector, module),
-    do: new!(node_selector, module, 5_000, 0, false)
+    do: new!(node_selector, module, 5_000, 0, 0, false)
 
   @spec new!(NodeSelector.t(), module(), pos_integer() | :infinity) :: t()
   def new!(node_selector, module, timeout),
-    do: new!(node_selector, module, timeout, 0, false)
+    do: new!(node_selector, module, timeout, 0, 0, false)
 
   @spec new!(NodeSelector.t(), module(), pos_integer() | :infinity, non_neg_integer()) :: t()
   def new!(node_selector, module, timeout, retry),
-    do: new!(node_selector, module, timeout, retry, false)
+    do: new!(node_selector, module, timeout, retry, 0, false)
 
-  @spec new!(NodeSelector.t(), module(), pos_integer() | :infinity, non_neg_integer(), boolean()) ::
-          t()
-  def new!(node_selector, module, timeout, retry, error_handling) do
+  @spec new!(
+          NodeSelector.t(),
+          module(),
+          pos_integer() | :infinity,
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  def new!(node_selector, module, timeout, retry, sleep_before_retry),
+    do: new!(node_selector, module, timeout, retry, sleep_before_retry, false)
+
+  @spec new!(
+          NodeSelector.t(),
+          module(),
+          pos_integer() | :infinity,
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) :: t()
+  def new!(node_selector, module, timeout, retry, sleep_before_retry, error_handling) do
     %WrapperConfig{
       node_selector: node_selector,
       module: module,
       timeout: timeout,
       retry: retry,
+      sleep_before_retry: sleep_before_retry,
       error_handling: error_handling,
       functions: []
     }
     |> validate!()
   end
 
-  @doc """
-  Validates a `WrapperConfig` struct. Called automatically by all constructors.
-  Raises `EasyRpc.Error` on any invalid field.
-  """
+  @doc "Validates a `WrapperConfig` struct. Raises `EasyRpc.Error` on any invalid field."
   @spec validate!(t()) :: t()
   def validate!(%WrapperConfig{} = config) do
     validate_node_selector!(config.node_selector)
     validate_module!(config.module)
     validate_timeout!(config.timeout)
     validate_retry!(config.retry)
+    validate_sleep_before_retry!(config.sleep_before_retry)
     validate_error_handling!(config.error_handling)
     validate_functions!(config.functions)
     config
@@ -201,6 +195,15 @@ defmodule EasyRpc.WrapperConfig do
         "Invalid retry — expected non-negative integer, got: #{inspect(invalid)}"
       )
 
+  defp validate_sleep_before_retry!(s) when is_integer(s) and s >= 0, do: :ok
+
+  defp validate_sleep_before_retry!(invalid),
+    do:
+      Error.raise!(
+        :config_error,
+        "Invalid sleep_before_retry — expected non-negative integer (ms), got: #{inspect(invalid)}"
+      )
+
   defp validate_error_handling!(v) when is_boolean(v), do: :ok
 
   defp validate_error_handling!(invalid),
@@ -238,7 +241,15 @@ defmodule EasyRpc.WrapperConfig do
         "Invalid function spec — expected {atom, arity} or {atom, arity, keyword}, got: #{inspect(invalid)}"
       )
 
-  @valid_fun_keys [:new_name, :as, :retry, :timeout, :error_handling, :private]
+  @valid_fun_keys [
+    :new_name,
+    :as,
+    :retry,
+    :timeout,
+    :sleep_before_retry,
+    :error_handling,
+    :private
+  ]
 
   defp validate_function_opts!(opts, fun, arity) do
     Enum.each(opts, fn {key, value} ->
@@ -258,6 +269,7 @@ defmodule EasyRpc.WrapperConfig do
   defp validate_function_opt!(:retry, v, _, _) when is_integer(v) and v >= 0, do: :ok
   defp validate_function_opt!(:timeout, :infinity, _, _), do: :ok
   defp validate_function_opt!(:timeout, v, _, _) when is_integer(v) and v > 0, do: :ok
+  defp validate_function_opt!(:sleep_before_retry, v, _, _) when is_integer(v) and v >= 0, do: :ok
   defp validate_function_opt!(:error_handling, v, _, _) when is_boolean(v), do: :ok
   defp validate_function_opt!(:private, v, _, _) when is_boolean(v), do: :ok
 

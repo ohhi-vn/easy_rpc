@@ -93,8 +93,19 @@ defmodule EasyRpc.RpcCall do
   ## Private — Execution
 
   # Bare execution: no rescue, raises on any error.
+  # Node selection errors will still raise here by design,
+  # but we at least log them before re-raising.
   defp execute_bare(config, function, args) do
-    node = select_node(config, args)
+    node =
+      case select_node_safe(config, args) do
+        {:ok, n} ->
+          n
+
+        {:error, error} ->
+          log_failure(config, :unknown, function, args, 0, error)
+          raise error
+      end
+
     log_call(config, node, function, args, :debug)
     result = Erpc.call(node, config.module, function, args, config.timeout)
     log_success(config, node, function, args, result, :debug)
@@ -103,38 +114,43 @@ defmodule EasyRpc.RpcCall do
 
   # Full execution: rescues exceptions, supports retry.
   defp execute_with_error_handling(config, function, args, attempt \\ 0) do
-    node = select_node(config, args)
-    log_call(config, node, function, args, :debug, attempt)
+    case select_node_safe(config, args) do
+      {:error, error} ->
+        handle_error(config, function, args, :unknown, error, attempt)
 
-    try do
-      result = Erpc.call(node, config.module, function, args, config.timeout)
-      log_success(config, node, function, args, result, :debug)
-      {:ok, result}
-    rescue
-      exception ->
-        error =
-          Error.wrap_exception(exception,
-            node: node,
-            attempt: attempt,
-            module: config.module,
-            function: function
-          )
+      {:ok, node} ->
+        log_call(config, node, function, args, :debug, attempt)
 
-        handle_error(config, function, args, node, error, attempt)
-    catch
-      kind, reason ->
-        error =
-          Error.rpc_error(
-            "Caught #{kind}: #{inspect(reason)}",
-            node: node,
-            kind: kind,
-            reason: reason,
-            attempt: attempt,
-            module: config.module,
-            function: function
-          )
+        try do
+          result = Erpc.call(node, config.module, function, args, config.timeout)
+          log_success(config, node, function, args, result, :debug)
+          {:ok, result}
+        rescue
+          exception ->
+            error =
+              Error.wrap_exception(exception,
+                node: node,
+                attempt: attempt,
+                module: config.module,
+                function: function
+              )
 
-        handle_error(config, function, args, node, error, attempt)
+            handle_error(config, function, args, node, error, attempt)
+        catch
+          kind, reason ->
+            error =
+              Error.rpc_error(
+                "Caught #{kind}: #{inspect(reason)}",
+                node: node,
+                kind: kind,
+                reason: reason,
+                attempt: attempt,
+                module: config.module,
+                function: function
+              )
+
+            handle_error(config, function, args, node, error, attempt)
+        end
     end
   end
 
@@ -142,6 +158,7 @@ defmodule EasyRpc.RpcCall do
     if should_retry?(config, attempt) do
       retries_left = config.retry - attempt
       log_retry(config, node, function, args, retries_left, attempt, error)
+      maybe_sleep(config.sleep_before_retry)
       execute_with_error_handling(config, function, args, attempt + 1)
     else
       log_failure(config, node, function, args, attempt, error)
@@ -149,10 +166,18 @@ defmodule EasyRpc.RpcCall do
     end
   end
 
+  defp maybe_sleep(0), do: :ok
+  defp maybe_sleep(ms), do: Process.sleep(ms)
+
   defp should_retry?(config, attempt), do: config.retry > 0 and attempt < config.retry
 
-  defp select_node(%WrapperConfig{node_selector: selector}, args),
-    do: NodeSelector.select_node(selector, args)
+  # Wraps node selection so callers can pattern-match instead of rescue.
+  defp select_node_safe(%WrapperConfig{node_selector: selector}, args) do
+    {:ok, NodeSelector.select_node(selector, args)}
+  rescue
+    e in EasyRpc.Error -> {:error, e}
+    e -> {:error, Error.wrap_exception(e)}
+  end
 
   ## Private — Logging
 

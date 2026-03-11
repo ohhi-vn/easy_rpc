@@ -1,6 +1,6 @@
 # EasyRpc Architecture Documentation
 
-**Version:** 0.7.0
+**Version:** 0.8.0
 **Last Updated:** 2025
 
 ---
@@ -110,7 +110,7 @@ RpcWrapper (Config-based)          DefRpc (Declarative)
 FunctionGenerator                  WrapperConfig               NodeSelector
 ├── normalize_function_info/1     ├── load_config!/2          ├── new/4
 ├── resolve_function_name/2       ├── load_from_options!/1    ├── select_node/2
-├── merge_config/2                ├── new!/2-5                ├── Strategy: random
+├── merge_config/2                ├── new!/2-6                ├── Strategy: random
 ├── parse_arity/1                 ├── validate!/1             ├── Strategy: round_robin
 ├── generate_arg_vars/1           └── Type Specs              ├── Strategy: hash
 └── validate_function_opts!/1                                 └── Sticky Node Support
@@ -126,7 +126,7 @@ RpcCall (implements RpcExecutor)
 ├── rpc_call/2             ← backward-compat alias
 ├── rpc_call_dynamic/3     ← backward-compat alias
 ├── Error Handling
-├── Retry Logic
+├── Retry Logic (with optional sleep between attempts)
 └── Structured Logging
 ```
 
@@ -220,7 +220,7 @@ defmodule MyApi do
     module: RemoteModule
 
   defrpc :get_user, args: 1
-  defrpc :create_user, args: 2, retry: 3
+  defrpc :create_user, args: 2, retry: 3, sleep_before_retry: 200
 end
 ```
 
@@ -247,7 +247,7 @@ Runtime Call → NodeSelector.load_config!/2 (each call)
 **Responsibilities:**
 
 - Normalize function specifications into canonical `{name, arity, opts}` tuples
-- Merge global and per-function `WrapperConfig` values
+- Merge global and per-function `WrapperConfig` values, including `sleep_before_retry`
 - Parse arity specifications (integer, `[]`, or named-atom list)
 - Generate AST variable lists for macro-expanded `def` bodies
 - Validate per-function option keys and values
@@ -257,7 +257,7 @@ Runtime Call → NodeSelector.load_config!/2 (each call)
 - `normalize_function_info/1` - Standardise function specs
 - `resolve_function_name/2` - Handle `:as` / `:new_name` overrides
 - `merge_config/2` - Combine global and local configs; auto-enables
-  `error_handling` when `retry > 0`
+  `error_handling` when `retry > 0`; propagates `sleep_before_retry`
 - `parse_arity/1` - Handle integer, empty list, and atom-list arities
 - `generate_arg_vars/1` - Create argument variable AST nodes
 - `validate_function_opts!/1` - Reject unknown or badly-typed options
@@ -285,13 +285,26 @@ Runtime Call → NodeSelector.load_config!/2 (each call)
 
 1. `load_config!/2` — Application environment
 2. `load_from_options!/1` — Keyword list
-3. `new!/2-5` — Direct struct creation
+3. `new!/2-6` — Direct struct creation
+
+**Fields:**
+
+| Field                 | Type                          | Default   | Description                                      |
+|-----------------------|-------------------------------|-----------|--------------------------------------------------|
+| `node_selector`       | `%NodeSelector{}` or `nil`    | —         | Node selection strategy                          |
+| `module`              | `atom`                        | required  | Remote module to call                            |
+| `timeout`             | `pos_integer \| :infinity`    | `5_000`   | Per-call timeout in milliseconds                 |
+| `retry`               | `non_neg_integer`             | `0`       | Number of retry attempts on failure              |
+| `sleep_before_retry`  | `non_neg_integer`             | `0`       | Milliseconds to sleep between retry attempts     |
+| `error_handling`      | `boolean`                     | `false`   | Return tagged tuples instead of raising          |
+| `functions`           | `[function_spec]`             | `[]`      | Function list for `RpcWrapper`                   |
 
 **Validation Rules:**
 
 - `module`: non-nil atom
 - `timeout`: positive integer or `:infinity`
 - `retry`: non-negative integer
+- `sleep_before_retry`: non-negative integer
 - `error_handling`: boolean
 - `node_selector`: `%NodeSelector{}` or `nil`
 - `functions`: list of valid `{name, arity}` or `{name, arity, keyword}` specs
@@ -354,7 +367,8 @@ Subsequent  → always returns node1 for that process
 
 - Implement `RpcExecutor` behavior
 - Execute RPC with or without error handling
-- Implement retry logic with per-attempt logging
+- Implement retry logic with configurable sleep between attempts
+- Safely handle node-selection failures inside the error-handling path
 - Manage timeouts via `:erpc`
 - Provide structured, detail-rich logging
 
@@ -381,9 +395,9 @@ execute(config, :get_user, [123])
 #=> {:ok, %User{id: 123}}
 #=> {:error, %EasyRpc.Error{...}}
 
-# With retry (automatically enables error handling)
+# With retry and sleep (automatically enables error handling)
 execute_with_retry(config, :get_user, [123])
-# retries up to config.retry times
+# retries up to config.retry times, sleeping config.sleep_before_retry ms between each
 #=> {:ok, result} | {:error, error}
 ```
 
@@ -398,9 +412,11 @@ execute/3
     │        ▼                           ▼
     │  execute_with_error_handling    execute_bare
     │        │                           │
+    │   select_node_safe            select_node
+    │        │                           │
+    │   {:ok, node} or {:error, _}   node (raises on failure)
+    │        │
     └────────┴───────────────────────────┘
-                        │
-               select_node (NodeSelector)
                         │
              :erpc.call(node, mod, fun, args, timeout)
                         │
@@ -415,8 +431,20 @@ execute/3
                                   │         │
                              log_retry  log_failure
                                   │         │
+                        maybe_sleep(sleep_before_retry)
+                                  │
                             execute again  {:error, error}
 ```
+
+**Node Selection Safety:**
+
+Node selection runs through `select_node_safe/2`, which wraps
+`NodeSelector.select_node/2` in a `rescue` and returns
+`{:ok, node} | {:error, %EasyRpc.Error{}}`. This ensures that a missing
+or empty node list never crashes the calling process when `error_handling`
+is enabled — the failure enters the normal `handle_error/6` path, respecting
+retry and logging just like any RPC error. In bare mode (`error_handling: false`),
+node selection errors are logged then re-raised.
 
 ---
 
@@ -513,8 +541,8 @@ These modules delegate entirely to `EasyRpc.Error`. New code should use
    - OR loads node config at call time (DefRpc → execute_dynamic)
         ↓
 3. RpcCall.execute/3 (or execute_dynamic/4)
-   - Selects node via NodeSelector
-   - Logs call with module, function/arity, node, timeout, retry config
+   - Selects node safely via select_node_safe/2
+   - Logs call with module, function/arity, node, timeout, retry, sleep_before_retry
         ↓
 4. :erpc.call/5
    - Network call to remote node
@@ -522,7 +550,9 @@ These modules delegate entirely to `EasyRpc.Error`. New code should use
         ↓
 5. Response Handling
    - Success → log_success → return result
-   - Exception → Error.wrap_exception → retry? → log + return error
+   - Exception → Error.wrap_exception → retry?
+       → yes: log_retry → sleep sleep_before_retry ms → retry
+       → no:  log_failure → return {:error, error}
         ↓
 6. Return to Caller
    - Bare result (error_handling: false)
@@ -537,20 +567,22 @@ Application.get_env(:my_app, :config_name)
 WrapperConfig.load_config!/2
         ↓
 Validate all parameters (raises EasyRpc.Error on failure)
+  — includes sleep_before_retry: non-negative integer
         ↓
 NodeSelector.load_config!/2 (same config key)
         ↓
 Validate node configuration
         ↓
-Return %WrapperConfig{node_selector: %NodeSelector{}, ...}
+Return %WrapperConfig{node_selector: %NodeSelector{}, sleep_before_retry: N, ...}
 ```
 
 ### Error Handling Flow
 
 ```
-Remote Call Fails
+Remote Call Fails (or node selection fails)
         ↓
 Exception / throw raised inside :erpc.call
+(or {:error, _} returned by select_node_safe/2)
         ↓
 RpcCall catches with rescue / catch
         ↓
@@ -559,9 +591,11 @@ Error.wrap_exception/2  (or Error.rpc_error/2 for catches)
         ↓
 should_retry?(config, attempt)?
         ↓
-  Yes → log_retry (warning) → execute_with_error_handling(attempt + 1)
+  Yes → log_retry (warning)
+      → Process.sleep(config.sleep_before_retry)   # 0 ms = no-op
+      → execute_with_error_handling(attempt + 1)
   No  → log_failure (error, "failed permanently after N attempt(s)")
-        → {:error, %EasyRpc.Error{}}
+      → {:error, %EasyRpc.Error{}}
 ```
 
 ---
@@ -583,7 +617,7 @@ should_retry?(config, attempt)?
 ### 3. Template Method Pattern
 
 - **Module:** `RpcCall`
-- **Purpose:** Common execution flow with customizable error / retry handling
+- **Purpose:** Common execution flow with customizable error / retry / sleep handling
 - **Variants:** Bare, with error handling, with retry, dynamic
 
 ### 4. Facade Pattern
@@ -602,7 +636,7 @@ should_retry?(config, attempt)?
 
 - **Module:** `WrapperConfig`
 - **Purpose:** Flexible, validated configuration construction
-- **Methods:** `new!/2-5`, `load_config!/2`, `load_from_options!/1`
+- **Methods:** `new!/2-6`, `load_config!/2`, `load_from_options!/1`
 
 ---
 
@@ -623,7 +657,7 @@ defmodule MyCustomExecutor do
 
   @impl true
   def execute_with_retry(config, function, args) do
-    # Custom retry logic — e.g. exponential backoff
+    # Custom retry logic — e.g. exponential backoff instead of fixed sleep
   end
 end
 ```
@@ -704,10 +738,11 @@ ConfigError, RpcError (backward-compat shims → Error)
 
 **Runtime:**
 
-- Node selection (`NodeSelector`)
+- Node selection (`NodeSelector`) via `select_node_safe/2`
 - Node config loading (`DefRpc` via `execute_dynamic`)
 - RPC execution (`:erpc.call`)
 - Error handling, wrapping, and logging
+- Retry logic with optional sleep between attempts
 - Retry logic
 
 ---
@@ -727,6 +762,8 @@ ConfigError, RpcError (backward-compat shims → Error)
 - Dynamic config reload (`DefRpc`): ~10–50 µs (`Application.get_env`)
 - RPC call: network latency (typically 1–50 ms on LAN)
 - Error handling path: ~10–50 µs additional overhead
+- `sleep_before_retry`: adds exactly `N ms × retry_count` to the worst-case
+  latency of a fully-exhausted retry sequence; zero overhead on the success path
 
 ### Optimization Guidance
 
@@ -735,6 +772,9 @@ ConfigError, RpcError (backward-compat shims → Error)
 3. Prefer static node lists over MFA for hot paths
 4. Set `error_handling: false` on performance-critical, non-critical paths
 5. Use `RpcWrapper` (compile-time config) instead of `DefRpc` when topology is stable
+6. Leave `sleep_before_retry` at `0` (default) for latency-sensitive paths;
+   set it only where giving a remote service recovery time is more important
+   than fast failure propagation
 
 ---
 
@@ -768,7 +808,7 @@ All log lines follow the format `[EasyRpc] <symbol> module.function/arity on nod
 |--------|---------|-----------------------------------------|
 | `-->`  | debug   | RPC call initiated                      |
 | `<--`  | debug   | RPC call succeeded                      |
-| `<<<`  | warning | Attempt failed, retrying                |
+| `<<<`  | warning | Attempt failed, retrying (includes sleep info when > 0) |
 | `!!!`  | error   | All attempts exhausted, permanently failed |
 
 ### Recommended Additions
@@ -794,12 +834,17 @@ All log lines follow the format `[EasyRpc] <symbol> module.function/arity on nod
 - Multi-node setup for realistic distributed scenarios
 - Simulate network failures / node downs
 - Verify retry exhaustion and logging output
+- Use wall-clock timing assertions to verify `sleep_before_retry` fires
+  the correct number of times (once per retry, never on success or first attempt)
 
 ### Key Testing Notes
 
 - `Application.put_env` for configs used by `use RpcWrapper` / `use DefRpc`
   **must be called at module body level**, not inside `setup_all` — wrapper
   modules are compiled before test callbacks run.
+- When testing `sleep_before_retry`, use `retry: 1` or `retry: 2` with a
+  sleep value large enough to be measurable (≥ 50 ms) but small enough not
+  to slow the suite noticeably.
 
 ---
 
@@ -810,7 +855,7 @@ The EasyRpc architecture is designed for:
 - **Clarity**: Easy to understand and navigate
 - **Maintainability**: Clean separation of concerns, DRY via `FunctionGenerator`
 - **Extensibility**: Behavior-based design
-- **Reliability**: Comprehensive error handling with structured logging
+- **Reliability**: Comprehensive error handling with structured logging and safe node selection
 - **Performance**: Minimal overhead, multiple optimization paths
 - **Type Safety**: Complete typespec coverage
 
@@ -820,5 +865,4 @@ replaced independently while maintaining overall system integrity.
 ---
 
 **Last Updated:** 2025
-**Version:** 0.7.0
-**Architecture Status:** ✅ Production Ready
+**Version:** 0.8.0

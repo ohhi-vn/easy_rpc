@@ -74,35 +74,46 @@ defmodule EasyRpc.Utils.FunctionGenerator do
   Merges per-function opts over `global_config`, returning a new `WrapperConfig`.
 
   Automatically sets `error_handling: true` when `retry > 0`.
-
-  ## Examples
-
-      merge_config(%WrapperConfig{retry: 0, timeout: 5000, error_handling: false}, [retry: 3])
-      #=> %WrapperConfig{retry: 3, timeout: 5000, error_handling: true}
   """
   @spec merge_config(WrapperConfig.t(), function_opts()) :: WrapperConfig.t()
   def merge_config(%WrapperConfig{} = global, fun_opts) do
     retry = Keyword.get(fun_opts, :retry, global.retry)
     timeout = Keyword.get(fun_opts, :timeout, global.timeout)
+    sleep_before_retry = Keyword.get(fun_opts, :sleep_before_retry, global.sleep_before_retry)
 
     error_handling =
       if retry > 0,
         do: true,
         else: Keyword.get(fun_opts, :error_handling, global.error_handling)
 
-    %{global | retry: retry, timeout: timeout, error_handling: error_handling}
+    %{
+      global
+      | retry: retry,
+        timeout: timeout,
+        sleep_before_retry: sleep_before_retry,
+        error_handling: error_handling
+    }
   end
 
   @doc """
   Validates all keys and values in a per-function opts list.
   Raises `EasyRpc.Error` on any unknown key or bad value.
 
-  Valid keys: `:as`, `:new_name`, `:retry`, `:timeout`, `:error_handling`,
-  `:private`, `:args`.
+  Valid keys: `:as`, `:new_name`, `:retry`, `:timeout`, `:sleep_before_retry`,
+  `:error_handling`, `:private`, `:args`.
   """
   @spec validate_function_opts!(function_opts()) :: :ok
   def validate_function_opts!(opts) when is_list(opts) do
-    valid_keys = [:as, :new_name, :retry, :timeout, :error_handling, :private, :args]
+    valid_keys = [
+      :as,
+      :new_name,
+      :retry,
+      :timeout,
+      :sleep_before_retry,
+      :error_handling,
+      :private,
+      :args
+    ]
 
     Enum.each(opts, fn {key, value} ->
       unless key in valid_keys do
@@ -171,6 +182,7 @@ defmodule EasyRpc.Utils.FunctionGenerator do
 
   ## Private
 
+  defp validate_function_opt_value!(:sleep_before_retry, v) when is_integer(v) and v >= 0, do: :ok
   defp validate_function_opt_value!(:as, v) when is_atom(v), do: :ok
   defp validate_function_opt_value!(:new_name, v) when is_atom(v), do: :ok
   defp validate_function_opt_value!(:private, v) when is_boolean(v), do: :ok
