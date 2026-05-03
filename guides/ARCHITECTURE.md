@@ -1,6 +1,6 @@
 # EasyRpc Architecture Documentation
 
-**Version:** 0.8.0
+**Version:** 0.9.0
 **Last Updated:** 2025
 
 ---
@@ -150,14 +150,34 @@ Error (Unified)                   RpcExecutor (Behavior)
 
 ### 1. EasyRpc (Main Module)
 
-**Purpose:** Public API and comprehensive documentation
+**Purpose:** Main DSL module using Spark DSL
 
 **Responsibilities:**
 
+- Spark DSL entry point for users
 - Library overview and usage guide
 - API documentation
 - Version management
-- Entry point for users
+
+**Usage Pattern:**
+
+```elixir
+defmodule MyApp.RemoteApi do
+  use EasyRpc
+
+  config do
+    nodes [:"api@node1", :"api@node2"]
+    select_mode :round_robin
+    module RemoteNode.Api
+    timeout 5_000
+  end
+
+  rpc_functions do
+    rpc_function :get_user, 1
+    rpc_function :create_user, 2
+  end
+end
+```
 
 **Key Functions:**
 
@@ -165,81 +185,81 @@ Error (Unified)                   RpcExecutor (Behavior)
 
 ---
 
-### 2. RpcWrapper (Config-Based Approach)
+### 2. EasyRpc.Dsl (Spark DSL Extension)
 
-**Purpose:** Generate wrapper functions from configuration at compile time
+**Purpose:** Define the Spark DSL structure for EasyRpc
 
 **Responsibilities:**
 
-- Read function definitions from application config
-- Generate wrapper functions via `FunctionGenerator`
-- Apply global configuration to all functions
-
-**Usage Pattern:**
-
-```elixir
-defmodule MyApi do
-  use EasyRpc.RpcWrapper,
-    otp_app: :my_app,
-    config_name: :api_config
-end
-```
+- Define `config` section with global settings
+- Define `rpc_functions` section with `rpc_function` entities
+- Validate DSL options
+- Work with Spark transformers and verifiers
 
 **Architecture:**
 
 ```
-Application Config → WrapperConfig.load_config!/2 → WrapperConfig
-                                                          ↓
-Function List → FunctionGenerator helpers → Generated def/defp
-                                                          ↓
-Runtime Call → RpcCall.execute/3 → Remote Result
+Spark.Dsl.Extension
+    ↓
+config section (nodes, module, timeout, retry, etc.)
+    ↓
+rpc_functions section → rpc_function entities
+    ↓
+Transformers generate wrapper functions
+    ↓
+Verifiers validate configuration
 ```
-
-> Node config is resolved at **compile time**. For runtime node changes, use
-> the `DefRpc` approach instead.
 
 ---
 
-### 3. DefRpc (Declarative Approach)
+### 3. EasyRpc.Info (Info Module)
 
-**Purpose:** Explicitly declare each wrapped function using the `defrpc` macro
+**Purpose:** Provide introspection functions for the DSL
 
 **Responsibilities:**
 
-- Provide `defrpc` macro for per-function declaration
-- Support per-function configuration overrides
-- Load node config **dynamically at runtime** on every call
+- Generate accessor functions for DSL sections
+- Allow querying config and function entities
+- Provide `config_nodes/1`, `config_module/1`, `rpc_functions/1`, etc.
 
-**Usage Pattern:**
+---
 
-```elixir
-defmodule MyApi do
-  use EasyRpc.DefRpc,
-    otp_app: :my_app,
-    config_name: :nodes_config,
-    module: RemoteModule
+### 4. EasyRpc.Transformers.GenerateRpcFunctions
 
-  defrpc :get_user, args: 1
-  defrpc :create_user, args: 2, retry: 3, sleep_before_retry: 200
-end
-```
+**Purpose:** Generate RPC wrapper functions from DSL definitions
+
+**Responsibilities:**
+
+- Read DSL state to get config and function entities
+- Generate public or private defs for each `rpc_function`
+- Inject function definitions into the module
 
 **Architecture:**
 
 ```
-defrpc Macro → FunctionGenerator helpers → Generated def/defp
-                                                  ↓
-Runtime Call → NodeSelector.load_config!/2 (each call)
-                                                  ↓
-             → RpcCall.execute_dynamic/4 → Remote Result
+DSL State → Transformer.get_entities/2 → Function Entities
+                                      ↓
+                            Generate function quotes
+                                      ↓
+                            Transformer.eval/3 → Injected def/defp
+                                      ↓
+                              Runtime Call → RpcCall.execute/3
 ```
-
-> Because node config is reloaded on every call, `DefRpc` handles topology
-> changes (e.g. new nodes joining a cluster) without recompiling.
 
 ---
 
-### 4. FunctionGenerator (Utility Module)
+### 5. EasyRpc.Verifiers.ValidateConfig
+
+**Purpose:** Validate DSL configuration at compile time
+
+**Responsibilities:**
+
+- Validate required fields (nodes, module)
+- Validate node list is not empty
+- Validate timeout and retry values
+- Validate function names and arities
+
+---
 
 **Purpose:** Extract common compile-time function generation logic shared by
 `RpcWrapper` and `DefRpc`
@@ -865,4 +885,4 @@ replaced independently while maintaining overall system integrity.
 ---
 
 **Last Updated:** 2025
-**Version:** 0.8.0
+**Version:** 0.9.0

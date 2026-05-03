@@ -191,36 +191,44 @@ defmodule EasyRpc.RpcCall do
     do: "#{inspect(config.module)}.#{function}/#{length(args)}"
 
   defp log_call(config, node, function, args, level, attempt \\ 0) do
-    Logger.log(
-      level,
-      "[EasyRpc] --> #{rpc_label(config, function, args)} on #{inspect(node)}" <>
-        attempt_str(attempt) <>
-        " [timeout: #{timeout_str(config.timeout)}, retry: #{config.retry}]"
-    )
+    if config.enable_logging do
+      Logger.log(
+        level,
+        "[EasyRpc] --> #{rpc_label(config, function, args)} on #{inspect(node)}" <>
+          attempt_str(attempt) <>
+          " [timeout: #{timeout_str(config.timeout)}, retry: #{config.retry}]"
+      )
+    end
   end
 
   defp log_success(config, node, function, args, result, level) do
-    Logger.log(
-      level,
-      "[EasyRpc] <-- #{rpc_label(config, function, args)} on #{inspect(node)} " <>
-        "succeeded — result: #{inspect(result)}"
-    )
+    if config.enable_logging do
+      Logger.log(
+        level,
+        "[EasyRpc] <-- #{rpc_label(config, function, args)} on #{inspect(node)} " <>
+          "succeeded — result: #{inspect(result)}"
+      )
+    end
   end
 
   defp log_retry(config, node, function, args, retries_left, attempt, error) do
-    Logger.warning(
-      "[EasyRpc] <<< #{rpc_label(config, function, args)} on #{inspect(node)} failed " <>
-        "(attempt #{attempt + 1}/#{config.retry + 1}, #{retries_left} retries left) — " <>
-        Error.format(error)
-    )
+    if config.enable_logging do
+      Logger.warning(
+        "[EasyRpc] <<< #{rpc_label(config, function, args)} on #{inspect(node)} failed " <>
+          "(attempt #{attempt + 1}/#{config.retry + 1}, #{retries_left} retries left) — " <>
+          Error.format(error)
+      )
+    end
   end
 
   defp log_failure(config, node, function, args, attempt, error) do
-    total_attempts = attempt + 1
+    if config.enable_logging do
+      total_attempts = attempt + 1
 
-    Logger.error(
-      "[EasyRpc] !!! #{rpc_label(config, function, args)} on #{inspect(node)} " <>
-        "failed permanently after #{total_attempts} attempt(s) — #{Error.format(error)}"
-    )
+      Logger.error(
+        "[EasyRpc] !!! #{rpc_label(config, function, args)} on #{inspect(node)} " <>
+          "failed permanently after #{total_attempts} attempt(s) — #{Error.format(error)}"
+      )
+    end
   end
 end

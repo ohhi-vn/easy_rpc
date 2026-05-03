@@ -30,16 +30,43 @@ defmodule EasyRpc.Utils.FunctionGenerator do
       iex> normalize_function_info({:get_user, 1})
       {:get_user, 1, []}
 
+      iex> normalize_function_info({:get_user, [:user_id]})
+      {:get_user, [:user_id], []}
+
       iex> normalize_function_info({:get_user, 1, [retry: 3]})
       {:get_user, 1, [retry: 3]}
+
+      iex> normalize_function_info({:get_user, [:user_id], [retry: 3]})
+      {:get_user, [:user_id], [retry: 3]}
   """
   @spec normalize_function_info(tuple()) :: function_info()
   def normalize_function_info({fun, arity}) when is_atom(fun) and is_integer(arity),
     do: {fun, arity, []}
 
-  def normalize_function_info({fun, arity, opts})
-      when is_atom(fun) and is_integer(arity) and is_list(opts),
-      do: {fun, arity, opts}
+  def normalize_function_info({fun, args}) when is_atom(fun) and is_list(args) do
+    unless Enum.all?(args, &is_atom/1) do
+      raise EasyRpc.Error.config_error(
+              "Invalid args list — all elements must be atoms, got: #{inspect(args)}"
+            )
+    end
+
+    {fun, args, []}
+  end
+
+  def normalize_function_info({fun, arity_or_args, opts})
+      when is_atom(fun) and is_list(opts) do
+    if is_integer(arity_or_args) do
+      {fun, arity_or_args, opts}
+    else
+      unless Enum.all?(arity_or_args, &is_atom/1) do
+        raise EasyRpc.Error.config_error(
+                "Invalid args list — all elements must be atoms, got: #{inspect(arity_or_args)}"
+              )
+      end
+
+      {fun, arity_or_args, opts}
+    end
+  end
 
   def normalize_function_info(invalid),
     do:

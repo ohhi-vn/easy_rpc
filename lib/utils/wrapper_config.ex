@@ -10,6 +10,7 @@ defmodule EasyRpc.WrapperConfig do
   - `retry`              - Retry attempts on failure (default: `0`)
   - `sleep_before_retry` - Milliseconds to sleep before each retry (default: `0`)
   - `error_handling`     - Return `{:ok, _} | {:error, _}` tuples (default: `false`)
+  - `enable_logging`     - Enable log for rpc
   - `functions`          - Function specs used by `RpcWrapper` (default: `[]`)
   """
 
@@ -26,6 +27,7 @@ defmodule EasyRpc.WrapperConfig do
           timeout: pos_integer() | :infinity,
           retry: non_neg_integer(),
           sleep_before_retry: non_neg_integer(),
+          enable_logging: boolean(),
           error_handling: boolean(),
           functions: [function_spec()]
         }
@@ -37,6 +39,7 @@ defmodule EasyRpc.WrapperConfig do
     retry: 0,
     sleep_before_retry: 0,
     error_handling: false,
+    enable_logging: true,
     functions: []
   ]
 

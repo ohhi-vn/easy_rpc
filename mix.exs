@@ -4,7 +4,7 @@ defmodule EasyRpc.MixProject do
   def project do
     [
       app: :easy_rpc,
-      version: "0.8.0",
+      version: "0.9.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -31,8 +31,11 @@ defmodule EasyRpc.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
-      {:benchee, "~> 1.5", only: :dev},
+      {:spark, "~> 2.6"},
+      {:benchee, "~> 1.5"},
+
+      # Documentation
+      {:ex_doc, "~> 0.40", only: :dev},
 
       # Support for AI agent in dev env
       {:tidewave, "~> 0.5", only: :dev},
@@ -68,7 +71,7 @@ defmodule EasyRpc.MixProject do
       "guides/**/*.md"
       |> Path.wildcard()
 
-    list = list ++ ["README.md"]
+    list = list ++ ["README.md", "CHANGELOG.md", "CONTRIBUTING.md"]
 
     list
     |> Enum.map(fn path ->
@@ -79,13 +82,15 @@ defmodule EasyRpc.MixProject do
         |> Enum.map_join(" ", &String.capitalize/1)
         |> case do
           "F A Q" -> "FAQ"
+          "Getting Started" -> "Getting Started"
+          "Migration Guide" -> "Migration Guide"
           no_change -> no_change
         end
 
       {String.to_atom(path),
        [
          title: title,
-         default: title == "Guide"
+         default: title == "Getting Started"
        ]}
     end)
   end

@@ -9,7 +9,7 @@ EasyRpc uses Erlang's `:erpc` module under the hood and adds retry, timeout, and
 Each function can carry its own options, or inherit global options declared at the module level.
 EasyRpc works seamlessly with [ClusterHelper](https://hex.pm/packages/cluster_helper) for dynamic Elixir clusters.
 
-*Note: Collab between human & AI.*
+*Note: Collaboration between human & AI.*
 
 ## Installation
 
@@ -18,123 +18,90 @@ Add `easy_rpc` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:easy_rpc, "~> 0.7.0"}
+    {:easy_rpc, "~> 0.9.0"}
   ]
 end
 ```
 
 ---
 
-## Two Usage Approaches
+## Usage (Spark DSL)
 
-| | `DefRpc` | `RpcWrapper` |
-|---|---|---|
-| Functions declared | In module via `defrpc` macro | In config file |
-| Node config loaded | At **runtime** per call | At **compile time** |
-| Cluster topology changes | ✅ Picked up automatically | Requires recompile |
-| Best for | Explicit control, dynamic clusters | All-in-config, stable topology |
+EasyRpc now uses [Spark DSL](https://hexdocs.pm/spark) for a more powerful and extensible DSL experience.
 
----
-
-## Usage — `DefRpc` (declarative macros)
-
-### 1. Add node config
+### 1. Define your RPC module
 
 ```elixir
-# config/config.exs  (or runtime.exs for runtime topology)
-config :my_app, :remote_defrpc,
-  nodes: [:"remote@127.0.0.1"],
-  # or: nodes: {ClusterHelper, :get_nodes, [:remote_api]},
-  select_mode: :round_robin,
-  sticky_node: true
-```
+defmodule MyApp.RemoteApi do
+  use EasyRpc
 
-> `:round_robin` and `:sticky_node` are tracked **per process**.
+  config do
+    nodes [:"api@node1", :"api@node2"]
+    select_mode :round_robin
+    sticky_node true
+    module RemoteNode.Api
+    timeout 5_000
+    retry 0
+    error_handling false
+  end
 
-### 2. Declare functions
-
-```elixir
-defmodule MyApp.Remote do
-  use EasyRpc.DefRpc,
-    otp_app: :my_app,
-    config_name: :remote_defrpc,
-    module: RemoteNode.Interface,
-    timeout: 1_000
-
-  defrpc :get_data
-  defrpc :put_data, args: 1
-  defrpc :clear, args: 2, as: :clear_data, private: true
-  defrpc :put_data, args: [:name], as: :put_with_retry, retry: 3, sleep_before_retry: 200, timeout: 1_000
+  rpc_functions do
+    rpc_function :get_user, 1
+    rpc_function :create_user, 2, retry: 3, timeout: 10_000
+    rpc_function :delete_user, 1, new_name: :remove_user, private: true
+  end
 end
 ```
 
-**`defrpc` options:**
+### 2. Use the generated functions
+
+```elixir
+# With error handling disabled (raises on error)
+user = MyApp.RemoteApi.get_user(123)
+
+# With error handling enabled (returns {:ok, result} or {:error, reason})
+case MyApp.RemoteApi.get_user(123) do
+  {:ok, user} -> process_user(user)
+  {:error, %EasyRpc.Error{} = error} -> Logger.error(EasyRpc.Error.format(error))
+end
+
+# Private functions (marked with private: true) are not exposed in the public API
+# They can only be called from within the module itself
+```
+
+### DSL Options
+
+#### `config` section:
 
 | Option                | Description                                           |
 |-----------------------|-------------------------------------------------------|
-| `:args`               | Arity as integer, `[]` (zero), or list of named atoms |
-| `:as` / `:new_name`   | Override the generated function name                  |
-| `:private`            | Generate as `defp` (default: `false`)                 |
-| `:retry`              | Override global retry count                           |
-| `:sleep_before_retry` | Milliseconds to wait before each retry (default: `0`) |
-| `:timeout`            | Override global timeout (ms or `:infinity`)           |
-| `:error_handling`     | Override global error-handling flag                   |
+| `:nodes`             | Static list of node names (e.g., [:"node1@host"]) |
+| `:nodes_provider`    | Dynamic node discovery via MFA `{Mod, Fun, Args}`    |
+| `:select_mode`       | `:random`, `:round_robin`, or `:hash` (default: `:random`) |
+| `:sticky_node`       | Pin to first selected node (default: `false`)     |
+| `:module`            | Remote module to call (required)                  |
+| `:timeout`           | Global timeout in ms (default: 5000, use `:infinity` for no timeout) |
+| `:retry`             | Global retry count (default: 0)                    |
+| `:sleep_before_retry`| Ms to wait before retry (default: 0)              |
+| `:error_handling`    | Return {:ok, result} tuples (default: `false`)    |
+| `:enable_logging`    | Enable detailed logging (default: `true`)         |
 
----
+#### `rpc_function` options:
 
-## Usage — `RpcWrapper` (config-driven)
-
-All function and node information is declared in config.
-Functions are generated at compile time.
-
-### 1. Add config
-
-```elixir
-# config/config.exs
-config :my_app, :data_wrapper,
-  nodes: [:"node1@host", :"node2@host"],
-  # or: nodes: {ClusterHelper, :get_nodes, [:data]},
-  error_handling: true,
-  select_mode: :random,
-  module: TargetApp.Interface.Api,
-  timeout: 5_000,
-  retry: 3,
-  sleep_before_retry: 500,       # wait 500 ms between retries
-  functions: [
-    # {function_name, arity}
-    # {function_name, arity, options}
-    {:get_data, 1},
-    {:put_data, 1, [error_handling: false]},
-    {:clear, 2, [new_name: :clear_data, retry: 3, sleep_before_retry: 100]},
-    {:clear_all, 0, [new_name: :reset, private: true]}
-  ]
-```
-
-### 2. Use in your module
-
-```elixir
-defmodule MyApp.DataHelper do
-  use EasyRpc.RpcWrapper,
-    otp_app: :my_app,
-    config_name: :data_wrapper
-
-  def process_remote() do
-    case get_data("key") do
-      {:ok, data}     -> data
-      {:error, reason} -> {:error, reason}
-    end
-  end
-end
-
-# Or call directly:
-{:ok, result} = MyApp.DataHelper.get_data("my_key")
-```
+| Option                | Description                                           |
+|-----------------------|-------------------------------------------------------|
+| `:new_name`          | Override the generated function name                  |
+| `:private`           | Generate as `defp` (default: `false`)                 |
+| `:retry`             | Override global retry count                           |
+| `:timeout`           | Override global timeout (ms)                         |
+| `:sleep_before_retry`| Override global sleep before retry                 |
+| `:error_handling`    | Override global error-handling flag                   |
 
 ---
 
 ## Node Selection Strategies
 
-Configure via `select_mode:` in your config:
+Configure via the `select_mode:` option in your `config` section:
 
 | Strategy       | Description                                                     |
 |----------------|-----------------------------------------------------------------|
@@ -145,9 +112,13 @@ Configure via `select_mode:` in your config:
 ### Sticky Nodes
 
 ```elixir
-config :my_app, :api,
-  nodes: [:node1@host, :node2@host],
-  select_mode: :random,
+config do
+  nodes: [:"node1@host", :"node2@host"]
+  select_mode: :random
+  sticky_node: true
+  module: RemoteNode.Api
+end
+```
   sticky_node: true   # process pins to first selected node
 ```
 
@@ -181,10 +152,14 @@ end
 Enable globally in config or per function:
 
 ```elixir
-config :my_app, :api, error_handling: true
+config do
+  error_handling true
+end
 
-# or per defrpc:
-defrpc :get_user, args: 1, error_handling: true
+# or per rpc_function:
+rpc_functions do
+  rpc_function :get_user, 1, error_handling: true
+end
 ```
 
 ---
@@ -193,10 +168,14 @@ defrpc :get_user, args: 1, error_handling: true
 
 ```elixir
 # Global retry
-config :my_app, :api, retry: 3
+config do
+  retry 3
+end
 
 # Per-function
-defrpc :critical_op, args: 1, retry: 5
+rpc_functions do
+  rpc_function :critical_op, 1, retry: 5
+end
 ```
 
 > When `retry > 0`, `error_handling` is automatically enabled — retried calls
@@ -213,12 +192,15 @@ on a flapping service.
 
 ```elixir
 # Global — all retries in this config wait 500 ms
-config :my_app, :api,
-  retry: 3,
-  sleep_before_retry: 500
+config do
+  retry 3
+  sleep_before_retry 500
+end
 
 # Per-function override
-defrpc :critical_op, args: 1, retry: 5, sleep_before_retry: 200
+rpc_functions do
+  rpc_function :critical_op, 1, retry: 5, sleep_before_retry: 200
+end
 ```
 
 The sleep happens **between** attempts — there is no delay before the first
@@ -240,12 +222,16 @@ attempt 4 → fails → return {:error, ...}
 
 ```elixir
 # Global
-config :my_app, :api, timeout: 5_000
+config do
+  timeout 5_000
+end
 
 # Per-function
-defrpc :long_op,      args: 1, timeout: 30_000
-defrpc :health_check,          timeout: 500
-defrpc :no_limit,              timeout: :infinity
+rpc_functions do
+  rpc_function :long_op, 1, timeout: 30_000
+  rpc_function :health_check, 0, timeout: 500
+  rpc_function :no_limit, 0, timeout: :infinity
+end
 ```
 
 ---
