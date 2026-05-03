@@ -4,7 +4,7 @@ defmodule EasyRpc.MixProject do
   def project do
     [
       app: :easy_rpc,
-      version: "0.9.0",
+      version: "0.9.1",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -32,7 +32,6 @@ defmodule EasyRpc.MixProject do
   defp deps do
     [
       {:spark, "~> 2.6"},
-      {:benchee, "~> 1.5"},
 
       # Documentation
       {:ex_doc, "~> 0.40", only: :dev},
@@ -40,7 +39,8 @@ defmodule EasyRpc.MixProject do
       # Support for AI agent in dev env
       {:tidewave, "~> 0.5", only: :dev},
       {:bandit, "~> 1.10", only: :dev},
-      {:usage_rules, "~> 1.2", only: [:dev]}
+      {:usage_rules, "~> 1.2", only: [:dev]},
+      {:benchee, "~> 1.5", only: [:dev]}
     ]
   end
 
